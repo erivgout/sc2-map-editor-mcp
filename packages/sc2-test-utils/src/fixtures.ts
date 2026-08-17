@@ -58,11 +58,20 @@ export const MINIMAL_DOCUMENT: Readonly<Record<string, string>> = Object.freeze(
     '        <WeaponArray index="0" Link="TestRifle"/>\r\n' +
     '    </CUnit>\r\n' +
     '</Catalog>\r\n',
+  // Weapon -> Effect -> Amount, wired the way real editor output does it. Two details
+  // taken from the shipped EditorTest.SC2Map: the weapon names its effect through
+  // `Effect value=` (not `Link=`), and the damage lives on a separate CEffectDamage.
   'Base.SC2Data/GameData/WeaponData.xml':
     '<?xml version="1.0" encoding="utf-8"?>\r\n<Catalog>\r\n' +
     '    <CWeaponLegacy id="TestRifle">\r\n' +
-    '        <DisplayEffect value="TestRifleDamage"/>\r\n' +
+    '        <Effect value="TestRifleDamage"/>\r\n' +
     '    </CWeaponLegacy>\r\n' +
+    '</Catalog>\r\n',
+  'Base.SC2Data/GameData/EffectData.xml':
+    '<?xml version="1.0" encoding="utf-8"?>\r\n<Catalog>\r\n' +
+    '    <CEffectDamage id="TestRifleDamage">\r\n' +
+    '        <Amount value="5"/>\r\n' +
+    '    </CEffectDamage>\r\n' +
     '</Catalog>\r\n',
   'Base.SC2Data/LibTest.galaxy': 'void TestInit () {\n    // fixture marker\n}\n',
   'enUS.SC2Data/LocalizedData/GameStrings.txt': 'Unit/Name/TestMarine=Test Marine\r\n',

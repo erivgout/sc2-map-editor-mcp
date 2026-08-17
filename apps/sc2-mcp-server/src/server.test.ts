@@ -99,11 +99,13 @@ describe('MCP server', () => {
     const names = tools.map((tool) => tool.name).sort();
 
     expect(names).toEqual([
+      'sc2_check_shared_object',
       'sc2_clone_catalog_object',
       'sc2_commit_document',
       'sc2_copy_text_key',
       'sc2_create_catalog_object',
       'sc2_create_snapshot',
+      'sc2_create_unit_from_template',
       'sc2_delete_catalog_object',
       'sc2_delete_text_key',
       'sc2_detect_installations',
@@ -120,6 +122,7 @@ describe('MCP server', () => {
       'sc2_get_server_info',
       'sc2_get_text_value',
       'sc2_get_user_maps',
+      'sc2_isolate_shared_object',
       'sc2_launch_editor',
       'sc2_list_catalog_domains',
       'sc2_list_component_types',
@@ -138,6 +141,7 @@ describe('MCP server', () => {
       'sc2_search_files',
       'sc2_search_text_keys',
       'sc2_set_text_value',
+      'sc2_set_unit_weapon_damage',
       'sc2_validate_document',
     ]);
 
@@ -210,6 +214,7 @@ describe('MCP server', () => {
     });
     const files = listed.structured['files'] as { path: string }[];
     expect(files.map((file) => file.path).sort()).toEqual([
+      'Base.SC2Data/GameData/EffectData.xml',
       'Base.SC2Data/GameData/UnitData.xml',
       'Base.SC2Data/GameData/WeaponData.xml',
       'Base.SC2Data/LibTest.galaxy',
@@ -310,6 +315,7 @@ describe('MCP server', () => {
 
     const gameData = components.find((component) => component.typeCode === 'gada');
     expect([...(gameData?.resolvedPaths ?? [])].sort()).toEqual([
+      'Base.SC2Data/GameData/EffectData.xml',
       'Base.SC2Data/GameData/UnitData.xml',
       'Base.SC2Data/GameData/WeaponData.xml',
     ]);
@@ -379,6 +385,7 @@ describe('MCP server', () => {
 
     const domains = await callTool(harness.client, 'sc2_list_catalog_domains', { workspace_id: workspaceId });
     expect(domains.structured['present']).toEqual([
+      { domain: 'Effect', count: 1 },
       { domain: 'Unit', count: 3 },
       { domain: 'Weapon', count: 1 },
     ]);
@@ -1011,6 +1018,159 @@ describe('MCP server', () => {
 
     expect(outcome.isError).toBe(true);
     expect((outcome.structured['error'] as Record<string, unknown>)['code']).toBe('SC2_PATH_DENIED');
+  });
+
+  it('creates a unit from a template with a name, stats, and its own weapon', async () => {
+    const opened = await callTool(harness.client, 'sc2_open_document', { source_path: harness.sourceDir });
+    const workspaceId = (opened.structured['workspace'] as Record<string, unknown>)['id'] as string;
+
+    const created = await callTool(harness.client, 'sc2_create_unit_from_template', {
+      workspace_id: workspaceId,
+      base_unit_id: 'TestMarine',
+      new_id: 'RailMarine',
+      display_name: 'Rail Marine',
+      stat_overrides: [{ path: 'LifeMax', value: '125' }],
+      isolate_weapon: true,
+      dry_run: false,
+    });
+    expect(created.isError).toBe(false);
+
+    // Every object that appeared is named, not left for the caller to discover.
+    const objects = created.structured['createdObjects'] as { domain: string; id: string }[];
+    expect(objects.map((object) => `${object.domain}/${object.id}`)).toEqual(['Unit/RailMarine', 'Weapon/RailMarineTestRifle']);
+
+    const resolved = await callTool(harness.client, 'sc2_resolve_catalog_object', {
+      workspace_id: workspaceId,
+      domain: 'Unit',
+      id: 'RailMarine',
+    });
+    const fields = new Map(
+      (resolved.structured['fields'] as { path: string; value: string; link: string }[]).map((field) => [field.path, field]),
+    );
+    expect(fields.get('LifeMax')?.value).toBe('125');
+    expect(fields.get('WeaponArray[0]')?.link).toBe('RailMarineTestRifle');
+
+    const name = await callTool(harness.client, 'sc2_get_text_value', {
+      workspace_id: workspaceId,
+      key: 'Unit/Name/RailMarine',
+    });
+    expect(name.structured['value']).toBe('Rail Marine');
+
+    // And the unit it was copied from still points at the original weapon.
+    const original = await callTool(harness.client, 'sc2_get_catalog_object', {
+      workspace_id: workspaceId,
+      domain: 'Unit',
+      id: 'TestMarine',
+    });
+    expect(original.structured['rawXml']).toContain('Link="TestRifle"');
+  });
+
+  it('changes one unit\'s weapon damage without touching the units that share it', async () => {
+    // PLAN.md §45's worked example, end to end.
+    const opened = await callTool(harness.client, 'sc2_open_document', { source_path: harness.sourceDir });
+    const workspaceId = (opened.structured['workspace'] as Record<string, unknown>)['id'] as string;
+
+    // Both TestMarine and TestReaper use TestRifle -> TestRifleDamage (Amount 5).
+    const applied = await callTool(harness.client, 'sc2_set_unit_weapon_damage', {
+      workspace_id: workspaceId,
+      unit_id: 'TestMarine',
+      damage: '100',
+      dry_run: false,
+    });
+    expect(applied.isError).toBe(false);
+
+    // The shared weapon and effect were cloned rather than edited.
+    const cloned = applied.structured['clonedForIsolation'] as string[];
+    expect(cloned).toEqual(['Weapon/TestMarineTestRifle', 'Effect/TestMarineTestRifleDamage']);
+
+    const isolatedEffect = await callTool(harness.client, 'sc2_get_catalog_object', {
+      workspace_id: workspaceId,
+      domain: 'Effect',
+      id: 'TestMarineTestRifleDamage',
+    });
+    expect(isolatedEffect.structured['rawXml']).toContain('<Amount value="100"/>');
+
+    // The original effect is untouched, so TestReaper still does 5.
+    const originalEffect = await callTool(harness.client, 'sc2_get_catalog_object', {
+      workspace_id: workspaceId,
+      domain: 'Effect',
+      id: 'TestRifleDamage',
+    });
+    expect(originalEffect.structured['rawXml']).toContain('<Amount value="5"/>');
+
+    const reaper = await callTool(harness.client, 'sc2_get_catalog_object', {
+      workspace_id: workspaceId,
+      domain: 'Unit',
+      id: 'TestReaper',
+    });
+    expect(reaper.structured['rawXml']).toContain('Link="TestRifle"');
+  });
+
+  it('edits a shared weapon in place when explicitly told to', async () => {
+    const opened = await callTool(harness.client, 'sc2_open_document', { source_path: harness.sourceDir });
+    const workspaceId = (opened.structured['workspace'] as Record<string, unknown>)['id'] as string;
+
+    const applied = await callTool(harness.client, 'sc2_set_unit_weapon_damage', {
+      workspace_id: workspaceId,
+      unit_id: 'TestMarine',
+      damage: '100',
+      modify_shared: true,
+      dry_run: false,
+    });
+
+    expect(applied.structured['clonedForIsolation']).toEqual([]);
+    // The escape hatch exists, but the caller is warned about its reach.
+    const diagnostics = applied.structured['diagnostics'] as { message: string }[];
+    expect(diagnostics.some((entry) => entry.message.includes('every object using'))).toBe(true);
+  });
+
+  it('reports whether an object is safe to edit in place', async () => {
+    const opened = await callTool(harness.client, 'sc2_open_document', { source_path: harness.sourceDir });
+    const workspaceId = (opened.structured['workspace'] as Record<string, unknown>)['id'] as string;
+
+    const shared = await callTool(harness.client, 'sc2_check_shared_object', {
+      workspace_id: workspaceId,
+      domain: 'Weapon',
+      id: 'TestRifle',
+    });
+    expect(shared.structured['shared']).toBe(true);
+    expect(String(shared.structured['recommendation'])).toContain('sc2_isolate_shared_object');
+
+    const notShared = await callTool(harness.client, 'sc2_check_shared_object', {
+      workspace_id: workspaceId,
+      domain: 'Unit',
+      id: 'TestMarine',
+    });
+    expect(notShared.structured['shared']).toBe(false);
+    expect(String(notShared.structured['recommendation'])).toContain('safe');
+  });
+
+  it('does not clone an object that nothing else references', async () => {
+    const opened = await callTool(harness.client, 'sc2_open_document', { source_path: harness.sourceDir });
+    const workspaceId = (opened.structured['workspace'] as Record<string, unknown>)['id'] as string;
+
+    // Give TestReaper its own weapon so TestRifle is used by one unit only.
+    await callTool(harness.client, 'sc2_patch_catalog_object', {
+      workspace_id: workspaceId,
+      domain: 'Unit',
+      id: 'TestReaper',
+      patches: [{ op: 'set_link', path: 'WeaponArray[0]', value: 'SomethingElse' }],
+      dry_run: false,
+    });
+
+    const outcome = await callTool(harness.client, 'sc2_isolate_shared_object', {
+      workspace_id: workspaceId,
+      domain: 'Weapon',
+      id: 'TestRifle',
+      owner_domain: 'Unit',
+      owner_id: 'TestMarine',
+      dry_run: false,
+    });
+
+    // Cloning an unshared object would just add a near-duplicate for no benefit.
+    expect(outcome.structured['isolated']).toBe(false);
+    expect(outcome.structured['effectiveId']).toBe('TestRifle');
+    expect(outcome.text).toContain('already safe');
   });
 
   it('lists workspaces so an id can be recovered after a reconnect', async () => {

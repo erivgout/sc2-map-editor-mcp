@@ -66,6 +66,10 @@ packed archives with a clear error, and `capabilities.mpq` reports `false`.
 | `sc2_launch_editor` | no | Open a document in the Galaxy Editor to confirm it loads |
 | `sc2_get_editor_logs` | yes | List or read the editor's own logs |
 | `sc2_get_user_maps` | yes | The user's Maps folder, resolved through the registry |
+| `sc2_create_unit_from_template` | no | Clone a unit with a name, stats, and its own weapon |
+| `sc2_set_unit_weapon_damage` | no | Change one unit's damage without touching units that share it |
+| `sc2_isolate_shared_object` | no | Give one owner its own copy of something shared |
+| `sc2_check_shared_object` | yes | Would editing this reach beyond one owner? |
 | `sc2_validate_document` | yes | Every check this build has, per category, with unchecked ones named |
 | `sc2_commit_document` | no | Write the staged document out, with backup and preflight |
 | `sc2_diff_workspace` | yes | Unified diff against the source, or against a snapshot |
@@ -96,6 +100,9 @@ defaults are conservative:
 - **Unimplemented means unimplemented.** A capability flag is only `true` when the code
   exists *and* its backend is present on this machine. The server would rather tell you
   it cannot do something than guess.
+- **Shared objects are never edited by accident.** Twenty units share one weapon. Asking
+  to change "this unit's damage" clones the chain, rewires only that unit, and tells you
+  exactly what it copied — unless you explicitly ask to modify the shared original.
 - **Edits are lossless, previewable, and reversible.** XML changes splice exact byte
   ranges, so everything outside the edit — comments, attribute order, CRLF endings,
   whether the file ends in a newline — comes out identical. Every mutation snapshots

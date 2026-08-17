@@ -6,6 +6,7 @@
  */
 
 export * from './archive/index.js';
+export * from './authoring/index.js';
 export * from './capabilities.js';
 export * from './changes/index.js';
 export * from './components/index.js';

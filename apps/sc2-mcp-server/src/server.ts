@@ -9,6 +9,7 @@
 import { McpServer } from '@modelcontextprotocol/server';
 
 import type { ServerContext } from './context.js';
+import { registerAuthoringTools } from './tools/authoring.js';
 import { registerCatalogTools } from './tools/catalog.js';
 import { registerCatalogMutationTools } from './tools/catalogMutation.js';
 import { registerChangeTools } from './tools/changes.js';
@@ -46,6 +47,7 @@ export function createMcpServer(context: ServerContext): McpServer {
   registerTextTools(server, context);
   registerValidationTools(server, context);
   registerEditorTools(server, context);
+  registerAuthoringTools(server, context);
 
   return server;
 }
