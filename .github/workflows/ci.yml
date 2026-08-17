@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# PLAN.md §39: CI runs everything that does not require StarCraft II. Editor and
+# runtime tests are local or self-hosted only — public CI must never depend on a game
+# installation.
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        # Windows is the primary platform; Linux catches accidental platform coupling
+        # in the path guard and process runner.
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # The floor of the supported range, so a Node-24+-only API cannot slip in.
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm run lint
+
+      - run: pnpm run typecheck
+
+      # Must precede the tests: tests/stdio.integration.test.ts drives the built server
+      # as a real child process and skips itself if dist/ is missing.
+      - run: pnpm run build
+
+      - run: pnpm run test

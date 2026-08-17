@@ -1,0 +1,8 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/sc2-core" },
+    { "path": "./packages/sc2-test-utils" },
+    { "path": "./apps/sc2-mcp-server" }
+  ]
+}

@@ -1,0 +1,16 @@
+# Normalize source text, but never touch SC2 documents or binary fixtures.
+* text=auto eol=lf
+
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# SC2 content: byte-for-byte fidelity matters for round-trip tests.
+*.SC2Map binary
+*.SC2Mod binary
+*.SC2Campaign binary
+*.SC2Components -text
+*.galaxy -text
+*.SC2Layout -text
+*.txt -text
+*.xml -text

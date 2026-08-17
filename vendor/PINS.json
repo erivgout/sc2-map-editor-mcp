@@ -1,0 +1,23 @@
+{
+  "$comment": "Pinned upstream sources fetched by scripts/bootstrap.ps1. The checkouts themselves are gitignored; only these pins are committed. Never follow a branch tip -- bump the commit deliberately and note why.",
+  "pins": [
+    {
+      "name": "sc2-galaxy-toolkit",
+      "repo": "https://github.com/sc2-arcade-watcher/sc2-galaxy-toolkit",
+      "ref": "95d1ff82b8e89fb0078c4b8e5e6622271b927b94",
+      "branchAtPinTime": "main",
+      "pinnedOn": "2026-08-17",
+      "destination": "vendor/sc2-galaxy-toolkit",
+      "why": "Galaxy/GameData/trigger/text/layout parsing. Upstream is work-in-progress with active refactor/* branches, so the tip is never safe to follow. Consumed only through packages/sc2-toolkit-adapter."
+    },
+    {
+      "name": "StormLib",
+      "repo": "https://github.com/ladislav-zezula/StormLib",
+      "ref": "master",
+      "branchAtPinTime": "master",
+      "pinnedOn": null,
+      "destination": "native/sc2mpq/third_party/StormLib",
+      "why": "MPQ read/write for the sc2mpq sidecar. PIN A COMMIT before Phase 3 is declared complete -- 'master' here is a placeholder recorded honestly rather than a fake hash."
+    }
+  ]
+}

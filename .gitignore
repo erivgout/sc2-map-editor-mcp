@@ -1,0 +1,38 @@
+# Node
+node_modules/
+*.tsbuildinfo
+dist/
+coverage/
+.eslintcache
+
+# pnpm
+.pnpm-store/
+
+# Native build output
+native/**/build/
+native/**/out/
+native/sc2mpq/third_party/StormLib/
+
+# Vendored upstream sources (fetched by scripts/bootstrap.ps1, pinned in vendor/PINS.json)
+vendor/*/
+
+# Local user config -- never commit machine-specific paths
+sc2-mcp.config.json
+sc2-mcp.config.local.json
+.env
+.env.local
+
+# Test/scratch output
+fixtures/generated/
+tmp/
+*.log
+
+# SC2 documents produced by local integration runs
+*.SC2Map
+*.SC2Mod
+*.SC2Campaign
+
+# OS
+Thumbs.db
+desktop.ini
+.DS_Store
