@@ -100,6 +100,7 @@ describe('MCP server', () => {
 
     expect(names).toEqual([
       'sc2_clone_catalog_object',
+      'sc2_commit_document',
       'sc2_copy_text_key',
       'sc2_create_catalog_object',
       'sc2_create_snapshot',
@@ -134,6 +135,7 @@ describe('MCP server', () => {
       'sc2_search_files',
       'sc2_search_text_keys',
       'sc2_set_text_value',
+      'sc2_validate_document',
     ]);
 
     for (const tool of tools) {
@@ -862,6 +864,150 @@ describe('MCP server', () => {
     const error = outcome.structured['error'] as Record<string, unknown>;
     expect(error['code']).toBe('SC2_INVALID_ARGUMENT');
     expect(String(error['suggestedAction'])).toContain('<n/>');
+  });
+
+  it('validates a document and states plainly what it did not check', async () => {
+    const opened = await callTool(harness.client, 'sc2_open_document', { source_path: harness.sourceDir });
+    const workspaceId = (opened.structured['workspace'] as Record<string, unknown>)['id'] as string;
+
+    const report = await callTool(harness.client, 'sc2_validate_document', { workspace_id: workspaceId });
+    expect(report.structured['valid']).toBe(true);
+
+    const checks = report.structured['checks'] as Record<string, { status: string; reason?: string }>;
+    expect(checks['gamedata']?.status).toBe('passed');
+    expect(checks['xml']?.status).toBe('passed');
+
+    // The point of the category model: unchecked is not the same as clean, and the report
+    // has to say so where a reader will see it.
+    expect(report.structured['notChecked']).toEqual(expect.arrayContaining(['galaxy', 'triggers', 'terrain']));
+    expect(checks['galaxy']?.reason).toContain('not checked at all');
+    expect(report.text).toContain('NOT CHECKED AT ALL');
+  });
+
+  it('reports malformed XML as a validation error', async () => {
+    const opened = await callTool(harness.client, 'sc2_open_document', { source_path: harness.sourceDir });
+    const workspace = opened.structured['workspace'] as Record<string, unknown>;
+    const workspaceId = workspace['id'] as string;
+
+    await writeFile(
+      path.join(workspace['stagingPath'] as string, 'Base.SC2Data', 'GameData', 'UnitData.xml'),
+      '<Catalog><CUnit id="Broken">',
+      'utf8',
+    );
+
+    const report = await callTool(harness.client, 'sc2_validate_document', { workspace_id: workspaceId });
+    expect(report.structured['valid']).toBe(false);
+    const errors = report.structured['errors'] as { category: string }[];
+    expect(errors.some((finding) => finding.category === 'xml')).toBe(true);
+  });
+
+  it('commits to a new directory and leaves the source alone', async () => {
+    const opened = await callTool(harness.client, 'sc2_open_document', { source_path: harness.sourceDir });
+    const workspaceId = (opened.structured['workspace'] as Record<string, unknown>)['id'] as string;
+
+    await callTool(harness.client, 'sc2_patch_catalog_object', {
+      workspace_id: workspaceId,
+      domain: 'Unit',
+      id: 'TestMarine',
+      patches: [{ op: 'set', path: 'LifeMax', value: '125' }],
+      dry_run: false,
+    });
+
+    const outputPath = path.join(harness.temp.path, 'out', 'Committed.SC2Map');
+    const committed = await callTool(harness.client, 'sc2_commit_document', {
+      workspace_id: workspaceId,
+      output_path: outputPath,
+    });
+
+    expect(committed.isError).toBe(false);
+    expect(committed.structured['overwritten']).toBe(false);
+
+    const written = await readFile(path.join(outputPath, 'Base.SC2Data', 'GameData', 'UnitData.xml'), 'utf8');
+    expect(written).toContain('<LifeMax value="125"/>');
+
+    // The source still holds the original value.
+    const source = await readFile(path.join(harness.sourceDir, 'Base.SC2Data', 'GameData', 'UnitData.xml'), 'utf8');
+    expect(source).toContain('<LifeMax value="60"/>');
+  });
+
+  it('refuses to overwrite an existing destination unless asked', async () => {
+    const opened = await callTool(harness.client, 'sc2_open_document', { source_path: harness.sourceDir });
+    const workspaceId = (opened.structured['workspace'] as Record<string, unknown>)['id'] as string;
+    const outputPath = path.join(harness.temp.path, 'out2', 'Committed.SC2Map');
+
+    await callTool(harness.client, 'sc2_commit_document', { workspace_id: workspaceId, output_path: outputPath });
+
+    const second = await callTool(harness.client, 'sc2_commit_document', {
+      workspace_id: workspaceId,
+      output_path: outputPath,
+    });
+    expect(second.isError).toBe(true);
+    expect((second.structured['error'] as Record<string, unknown>)['code']).toBe('SC2_CONFLICT');
+
+    const forced = await callTool(harness.client, 'sc2_commit_document', {
+      workspace_id: workspaceId,
+      output_path: outputPath,
+      overwrite: true,
+    });
+    expect(forced.structured['overwritten']).toBe(true);
+    // Backing up before an overwrite is the default, not something you have to remember.
+    expect(forced.structured['backupPath']).toMatch(/backup-/);
+  });
+
+  it('refuses to commit when the source changed after opening', async () => {
+    const opened = await callTool(harness.client, 'sc2_open_document', { source_path: harness.sourceDir });
+    const workspaceId = (opened.structured['workspace'] as Record<string, unknown>)['id'] as string;
+
+    await writeFile(path.join(harness.sourceDir, 'DocumentInfo'), 'CHANGED BY SOMEONE ELSE', 'utf8');
+
+    const outcome = await callTool(harness.client, 'sc2_commit_document', {
+      workspace_id: workspaceId,
+      output_path: path.join(harness.temp.path, 'out3', 'X.SC2Map'),
+    });
+
+    expect(outcome.isError).toBe(true);
+    expect((outcome.structured['error'] as Record<string, unknown>)['code']).toBe('SC2_SOURCE_CHANGED');
+  });
+
+  it('refuses to commit an invalid document unless forced', async () => {
+    const opened = await callTool(harness.client, 'sc2_open_document', { source_path: harness.sourceDir });
+    const workspace = opened.structured['workspace'] as Record<string, unknown>;
+    const workspaceId = workspace['id'] as string;
+
+    await writeFile(
+      path.join(workspace['stagingPath'] as string, 'Base.SC2Data', 'GameData', 'UnitData.xml'),
+      '<Catalog><CUnit id="Broken">',
+      'utf8',
+    );
+
+    const outputPath = path.join(harness.temp.path, 'out4', 'X.SC2Map');
+    const refused = await callTool(harness.client, 'sc2_commit_document', {
+      workspace_id: workspaceId,
+      output_path: outputPath,
+    });
+    expect(refused.isError).toBe(true);
+    expect((refused.structured['error'] as Record<string, unknown>)['code']).toBe('SC2_VALIDATION_FAILED');
+
+    const forced = await callTool(harness.client, 'sc2_commit_document', {
+      workspace_id: workspaceId,
+      output_path: outputPath,
+      force: true,
+    });
+    expect(forced.isError).toBe(false);
+    expect((forced.structured['validation'] as Record<string, unknown>)['valid']).toBe(false);
+  });
+
+  it('refuses to commit outside the allowed roots', async () => {
+    const opened = await callTool(harness.client, 'sc2_open_document', { source_path: harness.sourceDir });
+    const workspaceId = (opened.structured['workspace'] as Record<string, unknown>)['id'] as string;
+
+    const outcome = await callTool(harness.client, 'sc2_commit_document', {
+      workspace_id: workspaceId,
+      output_path: process.platform === 'win32' ? 'C:\\Windows\\Temp\\Escaped.SC2Map' : '/tmp/Escaped.SC2Map',
+    });
+
+    expect(outcome.isError).toBe(true);
+    expect((outcome.structured['error'] as Record<string, unknown>)['code']).toBe('SC2_PATH_DENIED');
   });
 
   it('lists workspaces so an id can be recovered after a reconnect', async () => {

@@ -63,6 +63,8 @@ packed archives with a clear error, and `capabilities.mpq` reports `false`.
 | `sc2_delete_text_key` | no | Remove localized strings |
 | `sc2_copy_text_key` | no | Copy strings between keys or locales |
 | `sc2_find_missing_localization` | yes | Catalog objects with no display name |
+| `sc2_validate_document` | yes | Every check this build has, per category, with unchecked ones named |
+| `sc2_commit_document` | no | Write the staged document out, with backup and preflight |
 | `sc2_diff_workspace` | yes | Unified diff against the source, or against a snapshot |
 | `sc2_get_changes` | yes | Change history, with the snapshot taken before each |
 | `sc2_revert_change` | no | Undo the most recent change |
@@ -80,8 +82,10 @@ This is a program that edits your maps on a language model's instructions, so th
 defaults are conservative:
 
 - **Your source is never modified.** `sc2_open_document` copies the document into a
-  server-owned staging directory. Every edit lands there. Writing back is a separate,
-  explicit commit step (not yet implemented).
+  server-owned staging directory. Every edit lands there. `sc2_commit_document` is the
+  only way anything leaves it, and it refuses on three independent grounds — validation
+  errors, the source having changed underneath you, and an occupied destination — each of
+  which has to be waived separately.
 - **Paths are allowlisted.** Nothing outside `allowedRoots` can be read or written.
   Paths are canonicalised first, so symlinks cannot be used to escape.
 - **Nothing runs a shell.** External programs are spawned with argument arrays, a

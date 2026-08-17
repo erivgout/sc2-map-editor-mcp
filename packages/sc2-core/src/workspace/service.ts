@@ -25,6 +25,8 @@ import { CatalogIndex, type CatalogSource } from '../gamedata/index.js';
 import type { Logger } from '../logging.js';
 import { resolveArchiveMemberPath, type PathGuard } from '../paths.js';
 import { findTextTables, parseTextTable, type TextTable, type TextTableLocation } from '../text/index.js';
+import { validateDocument, type ValidationReport } from '../validation/index.js';
+import { commitDocument, type CommitResult } from './commit.js';
 import { inspectSource, type SourceInfo } from './source.js';
 import { WorkspaceStore } from './store.js';
 import { toDescriptor, type DocumentKind, type SC2WorkspaceDescriptor, type WorkspaceState } from './types.js';
@@ -434,6 +436,89 @@ export class WorkspaceService {
     this.#logger.debug('catalog index built', { workspaceId, revision: state.revision, ...stats });
 
     return index;
+  }
+
+  /** Runs every validator this build has against the staged document (PLAN.md §31). */
+  async validate(workspaceId: string): Promise<ValidationReport> {
+    const state = await this.#store.read(workspaceId);
+    const layout = this.#store.layoutFor(workspaceId);
+    const files = await walkFiles(layout.workingPath, this.#walkLimits());
+
+    return validateDocument({
+      files,
+      workingPath: layout.workingPath,
+      sourceKind: state.sourceKind,
+      defaultLocale: this.#config.defaultLocale,
+    });
+  }
+
+  /**
+   * Writes the staged document out (PLAN.md §9).
+   *
+   * The output path is guarded like any other, so a commit cannot escape the allowed
+   * roots. Preflight checks are the caller's to interpret; this method performs them and
+   * refuses on its own only for the conditions the caller did not explicitly waive.
+   */
+  async commit(
+    workspaceId: string,
+    input: {
+      outputPath: string;
+      overwrite?: boolean | undefined;
+      backup?: boolean | undefined;
+      allowSourceDivergence?: boolean | undefined;
+      force?: boolean | undefined;
+    },
+  ): Promise<{ commit: CommitResult; validation: ValidationReport; sourceChanged: boolean }> {
+    const state = await this.#store.read(workspaceId);
+    const outputPath = await this.#pathGuard.resolveForCreate(input.outputPath);
+
+    // Refuse to write over the document we are staging from unless asked twice: once via
+    // overwrite, once by aiming at the source path knowingly.
+    if (path.resolve(outputPath) === path.resolve(state.sourcePath) && input.overwrite !== true) {
+      throw new SC2Error('SC2_CONFLICT', 'The output path is the source document. Pass overwrite=true to replace it.', {
+        workspaceId,
+        path: outputPath,
+        recoverable: true,
+        suggestedAction: 'Commit to a new path first and open it to check the result.',
+      });
+    }
+
+    const sourceCheck = await this.checkSourceUnchanged(workspaceId);
+    if (!sourceCheck.unchanged && input.allowSourceDivergence !== true) {
+      throw new SC2Error(
+        'SC2_SOURCE_CHANGED',
+        'The source document changed after this workspace was opened, so committing would discard those changes.',
+        {
+          workspaceId,
+          path: state.sourcePath,
+          recoverable: true,
+          suggestedAction:
+            'Reopen the document to pick up the external changes, or pass allow_source_divergence=true to commit anyway.',
+        },
+      );
+    }
+
+    const validation = await this.validate(workspaceId);
+    if (!validation.valid && input.force !== true) {
+      throw new SC2Error('SC2_VALIDATION_FAILED', `Validation found ${validation.errors.length} error(s); the commit was refused.`, {
+        workspaceId,
+        recoverable: true,
+        suggestedAction: 'Fix the errors, or pass force=true to commit a document known to be invalid.',
+        context: { errors: validation.errors.slice(0, 10).map((finding) => finding.message) },
+      });
+    }
+
+    const commit = await commitDocument({
+      outputPath,
+      workingPath: this.#store.layoutFor(workspaceId).workingPath,
+      sourceKind: state.sourceKind,
+      overwrite: input.overwrite ?? false,
+      backup: input.backup ?? true,
+      walkLimits: this.#walkLimits(),
+      logger: this.#logger,
+    });
+
+    return { commit, validation, sourceChanged: !sourceCheck.unchanged };
   }
 
   /** Locates the localized text tables in the staged document (PLAN.md §22). */
