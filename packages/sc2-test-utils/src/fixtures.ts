@@ -25,9 +25,22 @@ import { writeTree, type TempDir } from './temp.js';
  */
 export const MINIMAL_DOCUMENT: Readonly<Record<string, string>> = Object.freeze({
   DocumentInfo:
-    '<?xml version="1.0" encoding="utf-8"?>\r\n<DocInfo>\r\n    <Name>\r\n        <Value>Test Document</Value>\r\n    </Name>\r\n</DocInfo>\r\n',
+    '<?xml version="1.0" encoding="utf-8"?>\r\n<DocInfo>\r\n' +
+    '    <Name>\r\n        <Value>Test Document</Value>\r\n    </Name>\r\n' +
+    '    <ModType>\r\n        <Value>Interface</Value>\r\n    </ModType>\r\n' +
+    '    <Dependencies>\r\n' +
+    '        <Value>bnet:Void Multi (Mod)/0.0/999,file:Mods/VoidMulti.SC2Mod</Value>\r\n' +
+    '    </Dependencies>\r\n' +
+    '</DocInfo>\r\n',
+  // Shape verified against the unpacked EditorTest.SC2Map that ships with StarCraft II:
+  // the path is the element's TEXT CONTENT, not an attribute, and the file has NO
+  // trailing newline. Both details are exactly what a lossless writer must preserve.
   'ComponentList.SC2Components':
-    '<?xml version="1.0" encoding="utf-8"?>\r\n<Components>\r\n    <DataComponent Type="gada" Path="Base.SC2Data"/>\r\n</Components>\r\n',
+    '<?xml version="1.0" encoding="utf-8"?>\r\n<Components>\r\n' +
+    '    <DataComponent Type="gada">GameData</DataComponent>\r\n' +
+    '    <DataComponent Type="text" Locale="enUS">GameText</DataComponent>\r\n' +
+    '    <DataComponent Type="info">DocumentInfo</DataComponent>\r\n' +
+    '</Components>',
   'Base.SC2Data/GameData/UnitData.xml':
     '<?xml version="1.0" encoding="utf-8"?>\r\n<Catalog>\r\n    <CUnit id="TestMarine" parent="Marine">\r\n        <LifeMax value="45"/>\r\n    </CUnit>\r\n</Catalog>\r\n',
   'Base.SC2Data/LibTest.galaxy': 'void TestInit () {\n    // fixture marker\n}\n',

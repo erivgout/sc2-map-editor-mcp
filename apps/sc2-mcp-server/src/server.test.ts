@@ -100,8 +100,12 @@ describe('MCP server', () => {
     expect(names).toEqual([
       'sc2_detect_installations',
       'sc2_discard_workspace',
+      'sc2_get_dependencies',
+      'sc2_get_document_info',
       'sc2_get_document_summary',
       'sc2_get_server_info',
+      'sc2_list_component_types',
+      'sc2_list_components',
       'sc2_list_files',
       'sc2_list_workspaces',
       'sc2_open_document',
@@ -157,7 +161,11 @@ describe('MCP server', () => {
       expect.arrayContaining(['Base.SC2Data', 'ComponentList.SC2Components', 'DocumentInfo']),
     );
     // The model must be told what is unknown rather than inferring "absent".
-    expect(summary.structured['notYetImplemented']).toEqual(expect.arrayContaining(['components']));
+    expect(summary.structured['notYetImplemented']).toEqual(expect.arrayContaining(['catalogCounts']));
+    expect(summary.structured['componentTypes']).toEqual(['gada', 'text', 'info']);
+    expect(summary.structured['locales']).toEqual(['enUS']);
+    expect(summary.structured['documentName']).toBe('Test Document');
+    expect(summary.structured['dependencyCount']).toBe(1);
 
     const listed = await callTool(harness.client, 'sc2_list_files', {
       workspace_id: workspaceId,
@@ -242,6 +250,83 @@ describe('MCP server', () => {
     expect(result.isError).toBe(true);
     const firstBlock = result.content?.[0];
     expect(firstBlock?.type === 'text' ? firstBlock.text : '').toContain('Input validation error');
+  });
+
+  it('inventories components and resolves them to real staged files', async () => {
+    const opened = await callTool(harness.client, 'sc2_open_document', { source_path: harness.sourceDir });
+    const workspaceId = (opened.structured['workspace'] as Record<string, unknown>)['id'] as string;
+
+    const listed = await callTool(harness.client, 'sc2_list_components', { workspace_id: workspaceId });
+    expect(listed.isError).toBe(false);
+    expect(listed.structured['hasComponentList']).toBe(true);
+
+    const components = listed.structured['components'] as {
+      typeCode: string;
+      resolvedPaths: string[];
+      writable: boolean;
+      exists: boolean;
+    }[];
+
+    const gameData = components.find((component) => component.typeCode === 'gada');
+    expect(gameData?.resolvedPaths).toEqual(['Base.SC2Data/GameData/UnitData.xml']);
+    expect(gameData?.exists).toBe(true);
+
+    const text = components.find((component) => component.typeCode === 'text');
+    expect(text?.resolvedPaths).toEqual(['enUS.SC2Data/LocalizedData/GameStrings.txt']);
+
+    // PLAN.md §11: never claim write support just because a component can be read.
+    expect(components.every((component) => !component.writable)).toBe(true);
+  });
+
+  it('reads DocumentInfo and its dependency chain', async () => {
+    const opened = await callTool(harness.client, 'sc2_open_document', { source_path: harness.sourceDir });
+    const workspaceId = (opened.structured['workspace'] as Record<string, unknown>)['id'] as string;
+
+    const info = await callTool(harness.client, 'sc2_get_document_info', { workspace_id: workspaceId });
+    expect(info.structured['name']).toBe('Test Document');
+    expect(info.structured['modType']).toBe('Interface');
+    // A field the file does not contain must read as null, not "".
+    expect(info.structured['author']).toBeNull();
+
+    const dependencies = await callTool(harness.client, 'sc2_get_dependencies', { workspace_id: workspaceId });
+    const entries = dependencies.structured['dependencies'] as { name: string; file: string }[];
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.name).toBe('Void Multi (Mod)');
+    expect(entries[0]?.file).toBe('Mods/VoidMulti.SC2Mod');
+    // The model must not conclude a unit is missing merely because a dependency is unread.
+    expect(dependencies.structured['resolved']).toBe(false);
+  });
+
+  it('reports a missing DocumentInfo as SC2_NOT_FOUND rather than inventing one', async () => {
+    const bareDocument = path.join(harness.temp.path, 'bare', 'Bare.SC2Map');
+    await writeTree(bareDocument, { 'Base.SC2Data/GameData/UnitData.xml': '<Catalog/>' });
+
+    const opened = await callTool(harness.client, 'sc2_open_document', { source_path: bareDocument });
+    const workspaceId = (opened.structured['workspace'] as Record<string, unknown>)['id'] as string;
+
+    const info = await callTool(harness.client, 'sc2_get_document_info', { workspace_id: workspaceId });
+    expect(info.isError).toBe(true);
+    expect((info.structured['error'] as Record<string, unknown>)['code']).toBe('SC2_NOT_FOUND');
+
+    // And the summary must say the component list is absent, not pretend it is empty.
+    const summary = await callTool(harness.client, 'sc2_get_document_summary', { workspace_id: workspaceId });
+    expect(summary.structured['componentCount']).toBeNull();
+    const diagnostics = summary.structured['diagnostics'] as { severity: string; message: string }[];
+    expect(diagnostics.some((entry) => entry.message.includes('ComponentList'))).toBe(true);
+  });
+
+  it('surfaces a malformed component list as a diagnostic instead of failing the summary', async () => {
+    const brokenDocument = path.join(harness.temp.path, 'broken', 'Broken.SC2Map');
+    await writeTree(brokenDocument, { 'ComponentList.SC2Components': '<Components><DataComponent Type="gada">' });
+
+    const opened = await callTool(harness.client, 'sc2_open_document', { source_path: brokenDocument });
+    const workspaceId = (opened.structured['workspace'] as Record<string, unknown>)['id'] as string;
+
+    const summary = await callTool(harness.client, 'sc2_get_document_summary', { workspace_id: workspaceId });
+    // Knowing the file is broken beats getting nothing at all.
+    expect(summary.isError).toBe(false);
+    const diagnostics = summary.structured['diagnostics'] as { severity: string; code: string }[];
+    expect(diagnostics.some((entry) => entry.severity === 'error' && entry.code === 'SC2_PARSE_ERROR')).toBe(true);
   });
 
   it('lists workspaces so an id can be recovered after a reconnect', async () => {

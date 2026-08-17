@@ -15,6 +15,7 @@ answer for a running build. As of now:
 | Subsystem | Read | Write | Notes |
 |---|---|---|---|
 | Workspace staging | ✅ | ✅ | Unpacked document directories only |
+| Component inventory | ✅ | ❌ | `ComponentList`, `DocumentInfo`, dependencies — verified against real editor output |
 | MPQ archives (`.SC2Map`, `.SC2Mod`) | ⚠️ | ❌ | Code complete but **never compiled** — see [docs/native-helper.md](docs/native-helper.md) |
 | GameData catalogs | ❌ | ❌ | Phase 5–6 |
 | Galaxy scripts | ❌ | ❌ | Phase 5, 9 |
@@ -40,8 +41,12 @@ packed archives with a clear error, and `capabilities.mpq` reports `false`.
 | `sc2_get_server_info` | yes | Versions, configuration, capability matrix, limitations |
 | `sc2_detect_installations` | yes | Find StarCraft II without scanning the disk |
 | `sc2_open_document` | no | Stage a document, get a `workspace_id` |
-| `sc2_get_document_summary` | yes | Kind, counts, top-level layout, known gaps |
+| `sc2_get_document_summary` | yes | Kind, counts, components, dependencies, diagnostics, known gaps |
 | `sc2_list_workspaces` | yes | Recover a `workspace_id` after a reconnect |
+| `sc2_list_components` | yes | Parse `ComponentList.SC2Components`; resolve each entry to real files |
+| `sc2_get_document_info` | yes | Name, author, mod type, icon, screenshots, dependencies |
+| `sc2_get_dependencies` | yes | Dependency chain in resolution order |
+| `sc2_list_component_types` | yes | Reference table of component type codes |
 | `sc2_list_files` | yes | Paginated listing of the staged tree |
 | `sc2_read_file` | yes | Read one staged file (text, or base64 for binary) |
 | `sc2_search_files` | yes | Literal substring search across staged text files |

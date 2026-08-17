@@ -117,24 +117,47 @@ export function registerWorkspaceTools(server: McpServer, context: ServerContext
     {
       title: 'Summarise an open SC2 document',
       description:
-        'Returns the workspace descriptor, staged file/byte counts, and the top-level entries of the staged tree. "notYetImplemented" lists the subsystems (components, dependencies, catalogs, Galaxy) this build cannot report on yet — treat their absence as unknown, not as empty.',
+        'Returns the workspace descriptor, staged file/byte counts, the top-level layout, the declared components, and the document name/author/dependencies. "notYetImplemented" lists subsystems this build cannot report on — treat their absence as unknown, not as empty. Parse failures appear in "diagnostics" rather than failing the call.',
       inputSchema: z.object({ workspace_id: WorkspaceIdSchema }),
       outputSchema: z.object({
         workspace: WorkspaceDescriptorSchema,
         fileCount: z.number().int(),
         totalBytes: z.number().int(),
         topLevelEntries: z.array(z.string()),
+        componentCount: z.number().int().nullable(),
+        componentTypes: z.array(z.string()),
+        locales: z.array(z.string()),
+        documentName: z.string().nullable(),
+        documentAuthor: z.string().nullable(),
+        dependencyCount: z.number().int(),
+        diagnostics: z.array(
+          z.object({
+            severity: z.enum(['error', 'warning', 'info']),
+            code: z.string(),
+            message: z.string(),
+            path: z.string().optional(),
+          }),
+        ),
         notYetImplemented: z.array(z.string()),
       }),
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     toolHandler({ name: 'sc2_get_document_summary', logger }, async (args) => {
       const summary = await workspaces.getSummary(args.workspace_id);
+      const componentTypes = summary.components?.components.map((component) => component.typeCode) ?? [];
+
       const text = [
         `Workspace ${summary.workspace.id} — ${summary.workspace.documentKind} (revision ${summary.workspace.revision}${summary.workspace.dirty ? ', dirty' : ''})`,
         `source: ${summary.workspace.sourcePath}`,
         `staged: ${summary.fileCount} files, ${summary.totalBytes} bytes`,
         `top level: ${summary.topLevelEntries.length === 0 ? '(empty)' : summary.topLevelEntries.join(', ')}`,
+        summary.components === null
+          ? 'components: no ComponentList.SC2Components in this document'
+          : `components: ${componentTypes.join(', ')}${summary.components.locales.length > 0 ? ` | locales: ${summary.components.locales.join(', ')}` : ''}`,
+        summary.documentInfo === null
+          ? 'DocumentInfo: absent'
+          : `DocumentInfo: ${summary.documentInfo.name ?? '(unnamed)'}${summary.documentInfo.author === null ? '' : ` by ${summary.documentInfo.author}`}, ${summary.documentInfo.dependencies.length} dependency/dependencies`,
+        ...summary.diagnostics.map((entry) => `[${entry.severity}] ${entry.message}`),
         `not yet inspectable: ${summary.notYetImplemented.join(', ')}`,
       ].join('\n');
 
@@ -143,6 +166,13 @@ export function registerWorkspaceTools(server: McpServer, context: ServerContext
         fileCount: summary.fileCount,
         totalBytes: summary.totalBytes,
         topLevelEntries: [...summary.topLevelEntries],
+        componentCount: summary.components?.components.length ?? null,
+        componentTypes,
+        locales: [...(summary.components?.locales ?? [])],
+        documentName: summary.documentInfo?.name ?? null,
+        documentAuthor: summary.documentInfo?.author ?? null,
+        dependencyCount: summary.documentInfo?.dependencies.length ?? 0,
+        diagnostics: [...summary.diagnostics],
         notYetImplemented: [...summary.notYetImplemented],
       });
     }),

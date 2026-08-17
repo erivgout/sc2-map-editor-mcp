@@ -6,8 +6,17 @@
  * tree, and every mutation from here on targets that copy.
  */
 
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
+import {
+  COMPONENT_LIST_FILENAME,
+  DOCUMENT_INFO_FILENAME,
+  parseComponentList,
+  parseDocumentInfo,
+  type ComponentList,
+  type DocumentInfo,
+} from '../components/index.js';
 import type { ServerConfig } from '../config.js';
 import { SC2Error } from '../errors.js';
 import { copyDirectory, walkFiles, type WalkOptions, type WalkedFile } from '../fs/index.js';
@@ -54,10 +63,28 @@ export interface DocumentSummary {
   /** Top-level entries of the staged tree — the fastest orientation signal. */
   readonly topLevelEntries: readonly string[];
   /**
+   * Parsed `ComponentList.SC2Components`, or `null` when the document has none.
+   *
+   * A missing component list is legitimate for some unpacked documents, so it is
+   * reported as absent rather than treated as an error.
+   */
+  readonly components: ComponentList | null;
+  /** Parsed `DocumentInfo`, or `null` when absent. */
+  readonly documentInfo: DocumentInfo | null;
+  /** Diagnostics gathered while reading the above. Parse failures land here, not as throws. */
+  readonly diagnostics: readonly Diagnostic[];
+  /**
    * Subsystems this build cannot report on yet. Present so the model is told what is
    * missing rather than inferring absence from silence (PLAN.md §11, §41).
    */
   readonly notYetImplemented: readonly string[];
+}
+
+export interface Diagnostic {
+  readonly severity: 'error' | 'warning' | 'info';
+  readonly code: string;
+  readonly message: string;
+  readonly path?: string;
 }
 
 export class WorkspaceService {
@@ -167,6 +194,48 @@ export class WorkspaceService {
     return toDescriptor(state, this.#store.layoutFor(workspaceId));
   }
 
+  /**
+   * Reads and parses one file from the staged tree, turning any failure into a
+   * diagnostic instead of an exception.
+   *
+   * A malformed `DocumentInfo` must not make the whole summary unavailable — knowing the
+   * file is broken is more useful than getting nothing.
+   */
+  async #readParsed<T>(
+    workingPath: string,
+    fileName: string,
+    parse: (source: string) => T,
+    diagnostics: Diagnostic[],
+  ): Promise<T | null> {
+    const absolutePath = path.join(workingPath, fileName);
+    let source: string;
+    try {
+      source = await readFile(absolutePath, 'utf8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        diagnostics.push({
+          severity: 'error',
+          code: 'SC2_IO_ERROR',
+          message: `Could not read ${fileName}.`,
+          path: fileName,
+        });
+      }
+      return null;
+    }
+
+    try {
+      return parse(source);
+    } catch (error) {
+      diagnostics.push({
+        severity: 'error',
+        code: error instanceof SC2Error ? error.code : 'SC2_PARSE_ERROR',
+        message: error instanceof Error ? error.message : `Could not parse ${fileName}.`,
+        path: fileName,
+      });
+      return null;
+    }
+  }
+
   async getSummary(workspaceId: string): Promise<DocumentSummary> {
     const state = await this.#store.touch(await this.#store.read(workspaceId));
     const layout = this.#store.layoutFor(workspaceId);
@@ -178,21 +247,67 @@ export class WorkspaceService {
       if (head !== undefined) topLevel.add(head);
     }
 
+    const diagnostics: Diagnostic[] = [];
+    const stagedPaths = files.map((file) => file.relativePath);
+
+    const components = await this.#readParsed(
+      layout.workingPath,
+      COMPONENT_LIST_FILENAME,
+      (source) => parseComponentList(source, stagedPaths),
+      diagnostics,
+    );
+    const documentInfo = await this.#readParsed(layout.workingPath, DOCUMENT_INFO_FILENAME, parseDocumentInfo, diagnostics);
+
+    if (components === null && !diagnostics.some((entry) => entry.path === COMPONENT_LIST_FILENAME)) {
+      diagnostics.push({
+        severity: 'warning',
+        code: 'SC2_UNSUPPORTED_COMPONENT',
+        message: `This document has no ${COMPONENT_LIST_FILENAME}, so its components cannot be enumerated.`,
+        path: COMPONENT_LIST_FILENAME,
+      });
+    }
+
+    for (const missing of components?.missing ?? []) {
+      diagnostics.push({
+        severity: 'warning',
+        code: 'SC2_UNSUPPORTED_COMPONENT',
+        message: `Component "${missing.path}" (type ${missing.typeCode}) is declared but no matching files were found in the document.`,
+        path: missing.path,
+      });
+    }
+
     return {
       workspace: toDescriptor(state, layout),
       fileCount: files.length,
       totalBytes: files.reduce((total, file) => total + file.size, 0),
       topLevelEntries: [...topLevel].sort(),
-      // Kept explicit and honest: these are Phase 4+ (PLAN.md §42).
-      notYetImplemented: [
-        'components',
-        'dependencies',
-        'locales',
-        'catalogCounts',
-        'galaxyScripts',
-        'diagnostics',
-      ],
+      components,
+      documentInfo,
+      diagnostics,
+      // Kept explicit and honest: these are Phase 5+ (PLAN.md §42).
+      notYetImplemented: ['catalogCounts', 'galaxyScripts', 'triggers', 'terrain'],
     };
+  }
+
+  /** Parsed `DocumentInfo`, or `null` when the document has none. */
+  async getDocumentInfo(workspaceId: string): Promise<DocumentInfo | null> {
+    await this.#store.read(workspaceId);
+    const layout = this.#store.layoutFor(workspaceId);
+    const diagnostics: Diagnostic[] = [];
+    const info = await this.#readParsed(layout.workingPath, DOCUMENT_INFO_FILENAME, parseDocumentInfo, diagnostics);
+
+    // Here a parse failure IS the answer to the caller's question, so unlike the summary
+    // it is surfaced as an error rather than a diagnostic they might overlook.
+    const failure = diagnostics.find((entry) => entry.severity === 'error');
+    if (failure !== undefined) {
+      throw new SC2Error('SC2_PARSE_ERROR', failure.message, {
+        workspaceId,
+        path: DOCUMENT_INFO_FILENAME,
+        recoverable: false,
+      });
+    }
+
+    return info;
   }
 
   /** Lists the staged tree. Callers paginate; this returns everything under the limits. */
