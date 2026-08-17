@@ -18,6 +18,7 @@ export * from './galaxy/index.js';
 export * from './gamedata/index.js';
 export * from './install/index.js';
 export * from './logging.js';
+export * from './mapdata/index.js';
 export * from './paths.js';
 export * from './process/index.js';
 export * from './text/index.js';

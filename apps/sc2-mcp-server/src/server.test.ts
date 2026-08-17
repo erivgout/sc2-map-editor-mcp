@@ -126,6 +126,7 @@ describe('MCP server', () => {
       'sc2_get_galaxy_file',
       'sc2_get_galaxy_symbols',
       'sc2_get_server_info',
+      'sc2_get_terrain_summary',
       'sc2_get_text_value',
       'sc2_get_trigger',
       'sc2_get_user_maps',
@@ -137,6 +138,8 @@ describe('MCP server', () => {
       'sc2_list_files',
       'sc2_list_galaxy_files',
       'sc2_list_locales',
+      'sc2_list_placed_objects',
+      'sc2_list_regions',
       'sc2_list_snapshots',
       'sc2_list_triggers',
       'sc2_list_workspaces',
@@ -192,7 +195,8 @@ describe('MCP server', () => {
     expect(capabilities['gamedata']).toEqual({ read: true, write: true, inheritance: true });
     // ...and nothing that depends on an unbuilt backend claims to.
     expect(capabilities['mpq']).toEqual({ read: false, write: false });
-    expect(capabilities['terrain']).toEqual({ read: false, write: false });
+    expect(capabilities['terrain']).toEqual({ read: true, write: false });
+    expect(capabilities['objects']).toEqual({ read: true, write: false });
     expect(capabilities['triggers']).toEqual({ read: true, write: false });
     expect(capabilities['localization']).toEqual({ read: true, write: true });
     // Galaxy is implemented but gated on the vendored toolkit, which this harness skips.

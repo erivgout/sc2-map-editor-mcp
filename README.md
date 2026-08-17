@@ -22,8 +22,8 @@ answer for a running build. As of now:
 | Triggers | ✅ | ⚠️ | Structure, names, search. Renaming only — structural editing deliberately not implemented |
 | Localization | ✅ | ✅ | Text tables, preserving BOM and CRLF exactly |
 | SC2Layout | ❌ | ❌ | Phase 10 |
-| Placed objects / regions | ❌ | ❌ | Phase 15 |
-| Terrain | ❌ | ❌ | Phase 16 |
+| Placed objects / regions | ✅ | ❌ | Both are XML, not binary. Read-only — writing needs an editor round-trip test |
+| Terrain | ⚠️ | ❌ | Descriptor only (tile set, dimensions, cliff sets). Bulk data reported by magic/version/size, never decoded |
 | Editor launch | ✅ | n/a | Opens a document in the Galaxy Editor; reads its logs. Automatic **test-map launching is not provided** — no reliable mechanism verified |
 
 Raw text search and file reading work on any staged document, so the server is already
@@ -76,6 +76,9 @@ packed archives with a clear error, and `capabilities.mpq` reports `false`.
 | `sc2_get_trigger` | yes | One element: type, name, contents, referrers, raw XML |
 | `sc2_search_triggers` | yes | Find trigger elements by name |
 | `sc2_rename_trigger` | no | Rename an element (edits TriggerStrings only) |
+| `sc2_list_placed_objects` | yes | Units, doodads, and points on the map |
+| `sc2_list_regions` | yes | Regions with their shapes |
+| `sc2_get_terrain_summary` | yes | Terrain descriptor plus binary component headers |
 | `sc2_create_unit_from_template` | no | Clone a unit with a name, stats, and its own weapon |
 | `sc2_set_unit_weapon_damage` | no | Change one unit's damage without touching units that share it |
 | `sc2_isolate_shared_object` | no | Give one owner its own copy of something shared |

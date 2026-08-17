@@ -83,10 +83,15 @@ export const IMPLEMENTED: ServerCapabilities = Object.freeze({
   // lowest-risk writable component in the document.
   localization: { read: true, write: true },
   layout: { read: false, write: false },
-  // Phase 15.
-  objects: { read: false, write: false },
-  // Phase 16.
-  terrain: { read: false, write: false },
+  // Phase 15. Objects and Regions turned out to be plain XML rather than the binary
+  // formats PLAN.md §27 anticipated, so reading them needs no reverse engineering.
+  // Writing stays false: §27 requires a codec proven by editor round-trip tests, and
+  // placing a unit involves id allocation and terrain interactions this does not model.
+  objects: { read: true, write: false },
+  // Phase 16. Only the t3Terrain.xml descriptor is read. The bulk data (heights,
+  // texture masks, cell flags) is reported by four-character code, version, and size
+  // only — decoding it would be guesswork, which §28 forbids without validated codecs.
+  terrain: { read: true, write: false },
   // Phase 13. Opening a document in the editor works; automatic test-map launching does
   // not exist, because no reliable mechanism for it has been verified (PLAN.md §29).
   editorLaunch: true,

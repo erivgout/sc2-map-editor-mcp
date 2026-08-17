@@ -152,12 +152,20 @@ The remaining fields are not yet understood and must not be synthesised.
 
 ## Binary component magics
 
-Read from the first bytes of each file; all are byte-reversed four-character codes.
+**The four-character-code byte order is not uniform.** This is the single easiest thing to
+get wrong here: assuming either convention misreads half the files.
 
-| File | First 4 bytes | Reads as | Next DWORD |
-|---|---|---|---|
-| `MapInfo` | `49 70 61 4D` | `MapI` | `0x27` = 39 (version) |
-| `DocumentHeader` | `48 32 43 53` | `SC2H` | `0x08` = 8 (version) |
+| File | First 4 bytes | In order | Reversed | Correct reading | Next DWORD |
+|---|---|---|---|---|---|
+| `MapInfo` | `49 70 61 4D` | `IpaM` | `MapI` | **reversed** | 39 (version) |
+| `DocumentHeader` | `48 32 43 53` | `H2CS` | `SC2H` | **reversed** | 8 (version) |
+| `t3HeightMap` | `48 4D 41 50` | `HMAP` | `PAMH` | **in order** | 101 |
+| `t3CellFlags` | — | `TCFL` | — | in order | 102 |
+| `t3Water` | — | `WATR` | — | in order | 110 |
+| `t3HardTile` | — | `HRDT` | — | in order | 102 |
+| `t3FluffDoodad` | — | `TFLD` | — | in order | 103 |
+
+`readBinaryHeader` therefore reports both forms rather than picking one.
 
 `MapInfo` version 39 is what editor build 97563 writes. PLAN.md §24 requires a validated
 codec and version gating before any binary write; nothing here is enough to write these.
@@ -195,10 +203,30 @@ conventions have **not** yet been checked byte-for-byte; do that before writing 
 
 ---
 
+## Components that turned out to be XML, not binary
+
+PLAN.md §21 and §27 both anticipate binary reverse engineering here. Four of these are
+plain XML, which the file listing hides because they have no extension:
+
+**`Triggers`** — `<TriggerData>` with `<Root>` and flat `<Element Type Id>` declarations.
+Elements reference each other by id rather than nesting, so the structure is a graph and a
+walker must guard against repeats. Names are **not** in this file; they live in
+`TriggerStrings.txt` as `<Type>/Name/<Id>`. Element types seen: Category, Comment,
+CustomScript, FunctionCall, FunctionDef, Param, ParamDef, Trigger, Variable.
+
+**`Objects`** — `<PlacedObjects Version="27">` holding `<ObjectUnit>`, `<ObjectDoodad>`,
+and `<ObjectPoint>`, each with `Id`, `Position="x,y,z"`, `Rotation`, `Scale`, `Type`, and
+optional `<Flag Index Value>` children.
+
+**`Regions`** — `<Regions>` with `<region id>`, `<name value>`, and a `<shape type="circle">`
+carrying `<center value>` and `<radius value>`. Marker elements such as `<invisible/>`
+appear with no value.
+
+**`Attributes`** and **`CustomAI`** — also XML; not yet modelled.
+
 ## Not yet examined
 
-- `Triggers` (1 MB in the sample), `Objects`, `Regions`, `Attributes`, `CustomAI` — all
-  binary, all unanalysed.
+- `Attributes`, `CustomAI` contents.
 - `MapScript.galaxy` — generated from the trigger data; must never be hand-edited as if it
   were a source file.
 - `PreloadAssetDB.txt`, `Preload.xml`, `BankList.xml`.

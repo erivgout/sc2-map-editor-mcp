@@ -28,6 +28,10 @@ import {
   buildTriggerTree,
   parseComponentList,
   parseDocumentInfo,
+  parsePlacedObjects,
+  parseRegions,
+  parseTerrainSummary,
+  readBinaryHeader,
   parseTextTable,
   parseTriggerData,
   parseXml,
@@ -209,6 +213,44 @@ describe.skipIf(mapPath === null)('real editor-produced document', () => {
     const tree = buildTriggerTree(data, { names, maxDepth: 2 });
     expect(tree.length).toBe(data.rootIds.length);
     expect(tree.some((node) => node.name !== null), 'no root element resolved to a name').toBe(true);
+  });
+
+  it('reads the shipped placed objects, regions, and terrain descriptor', async () => {
+    // PLAN.md §27 anticipated binary formats here. Objects and Regions are actually XML,
+    // which this asserts against genuine editor output rather than a fixture.
+    const objects = parsePlacedObjects(await readFile(path.join(documentPath, 'Objects'), 'utf8'));
+    expect(objects.objects.length).toBeGreaterThan(10);
+    expect([...objects.countsByKind.keys()]).toEqual(expect.arrayContaining(['ObjectDoodad']));
+
+    const doodad = objects.objects.find((object) => object.kind === 'ObjectDoodad');
+    expect(doodad?.type).toBeTruthy();
+    // Positions keep the file's own precision; parsing them to floats would lose it.
+    expect(doodad?.position).toMatch(/^-?[\d.]+,-?[\d.]+,-?[\d.]+$/);
+
+    const regions = parseRegions(await readFile(path.join(documentPath, 'Regions'), 'utf8'));
+    expect(regions.regions.length).toBeGreaterThan(0);
+    expect(regions.regions[0]?.name).toBeTruthy();
+    expect(regions.regions[0]?.shapeType).toBeTruthy();
+
+    const terrain = parseTerrainSummary(await readFile(path.join(documentPath, 't3Terrain.xml'), 'utf8'));
+    expect(terrain.tileSet).toBeTruthy();
+    // Vertex counts, one more than cells in each direction.
+    expect(terrain.dimensions).toMatch(/^\d+ \d+$/);
+    expect(terrain.cliffSets.length).toBeGreaterThan(0);
+  });
+
+  it('reads binary terrain headers without interpreting their contents', async () => {
+    const heightMap = await readFile(path.join(documentPath, 't3HeightMap'));
+    const header = readBinaryHeader('t3HeightMap', heightMap);
+
+    // The byte order is NOT uniform across SC2 components: t3HeightMap stores 'HMAP' in
+    // file order, while MapInfo stores 'MapI' reversed. Assuming either convention gets
+    // half the files wrong, so both forms are reported.
+    expect(header.magic).toBe('HMAP');
+    expect(header.magicReversed).toBe('PAMH');
+    expect(header.version).toBe(101);
+    expect(header.known).toBe(true);
+    expect(header.sizeBytes).toBeGreaterThan(100_000);
   });
 
   it('locates the installation and reports the current build', async () => {
