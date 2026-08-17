@@ -151,6 +151,23 @@ pnpm run verify
 integration test that spawns the built server as a real child process and speaks MCP to
 it over stdio.
 
+To read or write packed `.SC2Map` archives you also need the `sc2mpq` sidecar, which is
+built rather than shipped — it is a native binary, and a committed one would carry the
+build machine's paths. Fetch the pinned StormLib and compile it:
+
+```bash
+pwsh scripts/bootstrap.ps1 -Only StormLib
+```
+
+```bash
+pwsh scripts/build-native.ps1
+```
+
+This needs CMake, the MSVC toolset **and** the Windows SDK; see
+[docs/native-helper.md](docs/native-helper.md), which explains what fails without them.
+Everything except packed-archive support works fine if you skip it — `capabilities.mpq`
+simply reports `false`.
+
 Create a config file (see [docs/configuration.md](docs/configuration.md)):
 
 ```bash
@@ -197,6 +214,10 @@ The layering rule (PLAN.md §4): tool handlers validate input, call a domain ser
 translate the result. SC2 parsing never lives in a tool handler.
 
 ## Licensing and content
+
+MIT — see [LICENSE](LICENSE). Not affiliated with or endorsed by Blizzard Entertainment.
+Third-party sources fetched by `scripts/bootstrap.ps1` keep their own licenses; what is
+pinned and where it comes from is recorded in `vendor/PINS.json`.
 
 No Blizzard assets, extracted game data, or copyrighted map content is included in this
 repository, and none will be. Test fixtures are project-authored placeholders — useful

@@ -11,6 +11,7 @@ coverage/
 # Native build output
 native/**/build/
 native/**/out/
+native/**/bin/
 native/sc2mpq/third_party/StormLib/
 
 # Vendored upstream sources (fetched by scripts/bootstrap.ps1, pinned in vendor/PINS.json)
