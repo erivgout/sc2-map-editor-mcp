@@ -41,8 +41,29 @@ export const MINIMAL_DOCUMENT: Readonly<Record<string, string>> = Object.freeze(
     '    <DataComponent Type="text" Locale="enUS">GameText</DataComponent>\r\n' +
     '    <DataComponent Type="info">DocumentInfo</DataComponent>\r\n' +
     '</Components>',
+  // A two-level parent chain plus a shared weapon, so inheritance resolution and
+  // reference finding have something real to work on. Field shapes match observed editor
+  // output: `value=` scalars, `Link=` references, and `index=` array elements.
   'Base.SC2Data/GameData/UnitData.xml':
-    '<?xml version="1.0" encoding="utf-8"?>\r\n<Catalog>\r\n    <CUnit id="TestMarine" parent="Marine">\r\n        <LifeMax value="45"/>\r\n    </CUnit>\r\n</Catalog>\r\n',
+    '<?xml version="1.0" encoding="utf-8"?>\r\n<Catalog>\r\n' +
+    '    <CUnit id="TestMarineBase">\r\n' +
+    '        <LifeMax value="45"/>\r\n' +
+    '        <Speed value="2.25"/>\r\n' +
+    '    </CUnit>\r\n' +
+    '    <CUnit id="TestMarine" parent="TestMarineBase">\r\n' +
+    '        <LifeMax value="60"/>\r\n' +
+    '        <WeaponArray index="0" Link="TestRifle"/>\r\n' +
+    '    </CUnit>\r\n' +
+    '    <CUnit id="TestReaper" parent="TestMarineBase">\r\n' +
+    '        <WeaponArray index="0" Link="TestRifle"/>\r\n' +
+    '    </CUnit>\r\n' +
+    '</Catalog>\r\n',
+  'Base.SC2Data/GameData/WeaponData.xml':
+    '<?xml version="1.0" encoding="utf-8"?>\r\n<Catalog>\r\n' +
+    '    <CWeaponLegacy id="TestRifle">\r\n' +
+    '        <DisplayEffect value="TestRifleDamage"/>\r\n' +
+    '    </CWeaponLegacy>\r\n' +
+    '</Catalog>\r\n',
   'Base.SC2Data/LibTest.galaxy': 'void TestInit () {\n    // fixture marker\n}\n',
   'enUS.SC2Data/LocalizedData/GameStrings.txt': 'Unit/Name/TestMarine=Test Marine\r\n',
 });

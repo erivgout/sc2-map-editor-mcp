@@ -20,6 +20,7 @@ import {
 import type { ServerConfig } from '../config.js';
 import { SC2Error } from '../errors.js';
 import { copyDirectory, walkFiles, type WalkOptions, type WalkedFile } from '../fs/index.js';
+import { CatalogIndex, type CatalogSource } from '../gamedata/index.js';
 import type { Logger } from '../logging.js';
 import { resolveArchiveMemberPath, type PathGuard } from '../paths.js';
 import { inspectSource, type SourceInfo } from './source.js';
@@ -93,6 +94,14 @@ export class WorkspaceService {
   readonly #store: WorkspaceStore;
   readonly #logger: Logger;
   readonly #mpqExtractor: MpqExtractor | undefined;
+  /**
+   * Catalog indexes cached per workspace revision (PLAN.md §48).
+   *
+   * Parsing every GameData file is the expensive part of answering a catalog question, and
+   * a document's catalogs cannot change without the revision changing. Keyed by
+   * `<workspaceId>@<revision>` so a stale entry can never be served after a mutation.
+   */
+  readonly #catalogCache = new Map<string, CatalogIndex>();
 
   constructor(options: WorkspaceServiceOptions) {
     this.#config = options.config;
@@ -364,6 +373,51 @@ export class WorkspaceService {
       // such rather than as an I/O failure the caller cannot interpret.
       return { unchanged: false, expected: state.sourceHash, actual: null };
     }
+  }
+
+  /**
+   * Builds (or returns a cached) catalog index for a workspace.
+   *
+   * Only the document's own `*.SC2Data/GameData/*.xml` files are indexed — dependency
+   * archives are not loaded, and every tool that surfaces catalog results says so.
+   */
+  async getCatalogIndex(workspaceId: string): Promise<CatalogIndex> {
+    const state = await this.#store.read(workspaceId);
+    const cacheKey = `${workspaceId}@${state.revision}`;
+
+    const cached = this.#catalogCache.get(cacheKey);
+    if (cached !== undefined) return cached;
+
+    const layout = this.#store.layoutFor(workspaceId);
+    const files = await walkFiles(layout.workingPath, this.#walkLimits());
+
+    const catalogFiles = files.filter((file) => {
+      const segments = file.relativePath.toLowerCase().split('/');
+      return (
+        segments.length >= 3 &&
+        (segments[0] ?? '').endsWith('.sc2data') &&
+        segments[1] === 'gamedata' &&
+        file.relativePath.toLowerCase().endsWith('.xml')
+      );
+    });
+
+    const sources: CatalogSource[] = [];
+    for (const file of catalogFiles) {
+      sources.push({ path: file.relativePath, content: await readFile(file.absolutePath, 'utf8') });
+    }
+
+    const index = CatalogIndex.build(sources);
+
+    // Only this workspace's stale entries are dropped; other workspaces keep theirs.
+    for (const key of this.#catalogCache.keys()) {
+      if (key.startsWith(`${workspaceId}@`)) this.#catalogCache.delete(key);
+    }
+    this.#catalogCache.set(cacheKey, index);
+
+    const stats = index.stats();
+    this.#logger.debug('catalog index built', { workspaceId, revision: state.revision, ...stats });
+
+    return index;
   }
 
   /** Absolute path of the staged tree, for messages and user-facing hints. */

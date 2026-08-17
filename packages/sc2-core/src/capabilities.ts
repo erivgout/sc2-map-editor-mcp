@@ -63,8 +63,13 @@ export const IMPLEMENTED: ServerCapabilities = Object.freeze({
   // Editor before repacking may be advertised. That corpus does not exist yet, and a
   // repack that corrupts someone's map is the worst failure this project can produce.
   mpq: { read: true, write: false },
-  // Phases 5-6.
-  gamedata: { read: false, write: false, inheritance: false },
+  // Phase 6. Read and parent-chain inheritance work against the document's own catalogs.
+  //
+  // These do NOT depend on the Galaxy Toolkit: the catalog layer is built on this repo's
+  // own span-tracking XML parser, because the toolkit's CatalogStore indexes declarations
+  // only and offers neither field values nor inheritance. Spans are also what Phase 8's
+  // in-place mutations need. See docs/adr/0002-own-catalog-layer.md.
+  gamedata: { read: true, write: false, inheritance: true },
   // Phases 5, 9.
   galaxy: { read: false, write: false, typecheck: false },
   // Phases 5, 11.
@@ -106,11 +111,9 @@ export function deriveCapabilities(inputs: CapabilityInputs): ServerCapabilities
       read: IMPLEMENTED.mpq.read && mpqHelperAvailable,
       write: IMPLEMENTED.mpq.write && mpqHelperAvailable,
     },
-    gamedata: {
-      read: IMPLEMENTED.gamedata.read && toolkitAvailable,
-      write: IMPLEMENTED.gamedata.write && toolkitAvailable,
-      inheritance: IMPLEMENTED.gamedata.inheritance && toolkitAvailable,
-    },
+    // Not gated on the toolkit: the catalog layer is built on this repo's own XML parser
+    // and depends on nothing outside the process.
+    gamedata: { ...IMPLEMENTED.gamedata },
     galaxy: {
       read: IMPLEMENTED.galaxy.read && toolkitAvailable,
       write: IMPLEMENTED.galaxy.write && toolkitAvailable,

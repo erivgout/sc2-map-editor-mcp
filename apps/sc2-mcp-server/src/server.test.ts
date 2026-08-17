@@ -100,16 +100,21 @@ describe('MCP server', () => {
     expect(names).toEqual([
       'sc2_detect_installations',
       'sc2_discard_workspace',
+      'sc2_find_catalog_references',
+      'sc2_get_catalog_object',
       'sc2_get_dependencies',
       'sc2_get_document_info',
       'sc2_get_document_summary',
       'sc2_get_server_info',
+      'sc2_list_catalog_domains',
       'sc2_list_component_types',
       'sc2_list_components',
       'sc2_list_files',
       'sc2_list_workspaces',
       'sc2_open_document',
       'sc2_read_file',
+      'sc2_resolve_catalog_object',
+      'sc2_search_catalog',
       'sc2_search_files',
     ]);
 
@@ -137,8 +142,9 @@ describe('MCP server', () => {
     expect(outcome.isError).toBe(false);
 
     const capabilities = outcome.structured['capabilities'] as Record<string, { read: boolean; write: boolean }>;
-    // Workspace staging works in this build...
+    // Workspace staging and catalog reading work in this build...
     expect(capabilities['workspace']).toEqual({ read: true, write: true });
+    expect(capabilities['gamedata']).toEqual({ read: true, write: false, inheritance: true });
     // ...and nothing that depends on an unbuilt backend claims to.
     expect(capabilities['mpq']).toEqual({ read: false, write: false });
     expect(capabilities['terrain']).toEqual({ read: false, write: false });
@@ -172,7 +178,11 @@ describe('MCP server', () => {
       path_prefix: 'Base.SC2Data',
     });
     const files = listed.structured['files'] as { path: string }[];
-    expect(files.map((file) => file.path).sort()).toEqual(['Base.SC2Data/GameData/UnitData.xml', 'Base.SC2Data/LibTest.galaxy']);
+    expect(files.map((file) => file.path).sort()).toEqual([
+      'Base.SC2Data/GameData/UnitData.xml',
+      'Base.SC2Data/GameData/WeaponData.xml',
+      'Base.SC2Data/LibTest.galaxy',
+    ]);
 
     const read = await callTool(harness.client, 'sc2_read_file', {
       workspace_id: workspaceId,
@@ -187,7 +197,7 @@ describe('MCP server', () => {
     const matches = searched.structured['matches'] as { path: string; line: number }[];
     // The id appears in the catalog and again as a localisation key, and the search is
     // deliberately format-agnostic: it reports both rather than guessing which matters.
-    expect(matches.map((match) => match.path).sort()).toEqual([
+    expect([...new Set(matches.map((match) => match.path))].sort()).toEqual([
       'Base.SC2Data/GameData/UnitData.xml',
       'enUS.SC2Data/LocalizedData/GameStrings.txt',
     ]);
@@ -268,7 +278,10 @@ describe('MCP server', () => {
     }[];
 
     const gameData = components.find((component) => component.typeCode === 'gada');
-    expect(gameData?.resolvedPaths).toEqual(['Base.SC2Data/GameData/UnitData.xml']);
+    expect([...(gameData?.resolvedPaths ?? [])].sort()).toEqual([
+      'Base.SC2Data/GameData/UnitData.xml',
+      'Base.SC2Data/GameData/WeaponData.xml',
+    ]);
     expect(gameData?.exists).toBe(true);
 
     const text = components.find((component) => component.typeCode === 'text');
@@ -327,6 +340,87 @@ describe('MCP server', () => {
     expect(summary.isError).toBe(false);
     const diagnostics = summary.structured['diagnostics'] as { severity: string; code: string }[];
     expect(diagnostics.some((entry) => entry.severity === 'error' && entry.code === 'SC2_PARSE_ERROR')).toBe(true);
+  });
+
+  it('answers Data Editor questions about the catalog', async () => {
+    const opened = await callTool(harness.client, 'sc2_open_document', { source_path: harness.sourceDir });
+    const workspaceId = (opened.structured['workspace'] as Record<string, unknown>)['id'] as string;
+
+    const domains = await callTool(harness.client, 'sc2_list_catalog_domains', { workspace_id: workspaceId });
+    expect(domains.structured['present']).toEqual([
+      { domain: 'Unit', count: 3 },
+      { domain: 'Weapon', count: 1 },
+    ]);
+
+    const search = await callTool(harness.client, 'sc2_search_catalog', { workspace_id: workspaceId, query: 'marine' });
+    const results = search.structured['results'] as { domain: string; id: string }[];
+    expect(results.map((entry) => `${entry.domain}/${entry.id}`)).toEqual(['Unit/TestMarine', 'Unit/TestMarineBase']);
+
+    const object = await callTool(harness.client, 'sc2_get_catalog_object', {
+      workspace_id: workspaceId,
+      domain: 'Unit',
+      id: 'TestMarine',
+    });
+    expect(object.structured['parent']).toBe('TestMarineBase');
+    // Raw XML comes from the recorded span, so it is the declaration verbatim.
+    expect(object.structured['rawXml']).toContain('<CUnit id="TestMarine" parent="TestMarineBase">');
+
+    const resolved = await callTool(harness.client, 'sc2_resolve_catalog_object', {
+      workspace_id: workspaceId,
+      domain: 'Unit',
+      id: 'TestMarine',
+    });
+    const fields = new Map(
+      (resolved.structured['fields'] as { path: string; value: string; definedBy: string }[]).map((field) => [field.path, field]),
+    );
+    // Overridden locally...
+    expect(fields.get('LifeMax')).toMatchObject({ value: '60', definedBy: 'Unit/TestMarine' });
+    // ...and inherited, with the source named so a caller knows editing it hits the parent.
+    expect(fields.get('Speed')).toMatchObject({ value: '2.25', definedBy: 'Unit/TestMarineBase' });
+    expect(resolved.structured['complete']).toBe(true);
+
+    const references = await callTool(harness.client, 'sc2_find_catalog_references', {
+      workspace_id: workspaceId,
+      domain: 'Weapon',
+      id: 'TestRifle',
+    });
+    // Two units share the weapon, so a naive damage edit would hit both. The tool has to
+    // say so (PLAN.md §45).
+    expect(references.structured['shared']).toBe(true);
+    expect(references.structured['total']).toBe(2);
+    expect(references.structured['note']).toContain('clone it first');
+  });
+
+  it('reports an unknown catalog object without implying it does not exist', async () => {
+    const opened = await callTool(harness.client, 'sc2_open_document', { source_path: harness.sourceDir });
+    const workspaceId = (opened.structured['workspace'] as Record<string, unknown>)['id'] as string;
+
+    const outcome = await callTool(harness.client, 'sc2_get_catalog_object', {
+      workspace_id: workspaceId,
+      domain: 'Unit',
+      id: 'Zealot',
+    });
+
+    expect(outcome.isError).toBe(true);
+    const error = outcome.structured['error'] as Record<string, unknown>;
+    expect(error['code']).toBe('SC2_NOT_FOUND');
+    // Dependencies are not indexed, and the model must be told that rather than
+    // concluding the unit is absent from the game.
+    expect(String(error['suggestedAction'])).toContain('dependency');
+  });
+
+  it('rejects an unknown domain instead of returning zero results', async () => {
+    const opened = await callTool(harness.client, 'sc2_open_document', { source_path: harness.sourceDir });
+    const workspaceId = (opened.structured['workspace'] as Record<string, unknown>)['id'] as string;
+
+    const outcome = await callTool(harness.client, 'sc2_search_catalog', {
+      workspace_id: workspaceId,
+      domains: ['Untis'],
+    });
+
+    // An empty result for a typo'd domain would read as "this map has no units".
+    expect(outcome.isError).toBe(true);
+    expect((outcome.structured['error'] as Record<string, unknown>)['code']).toBe('SC2_INVALID_ARGUMENT');
   });
 
   it('lists workspaces so an id can be recovered after a reconnect', async () => {

@@ -145,4 +145,38 @@ describe.skipIf(mapPath === null)('staging a real document', () => {
 
     await service.discard(opened.workspace.id);
   }, 300_000);
+
+  it('indexes its GameData catalogs and resolves real inheritance', async () => {
+    const opened = await service.openDocument({ sourcePath: mapPath!, readOnly: true });
+    const index = await service.getCatalogIndex(opened.workspace.id);
+    const stats = index.stats();
+
+    // The shipped map carries a substantial catalog: ~18 files, thousands of entries.
+    expect(stats.fileCount).toBeGreaterThan(10);
+    expect(stats.entryCount).toBeGreaterThan(100);
+
+    // Not a single catalog file may fail to parse. This is the assertion that would catch
+    // a real-world XML construct the parser does not handle.
+    expect(index.diagnostics.filter((entry) => entry.severity === 'error')).toEqual([]);
+
+    // Domain derivation must work on the real spread of concrete types
+    // (CAbilEffectInstant, CValidatorUnitCompareVital, CWeaponLegacy, …).
+    const domains = index.domains().map((entry) => entry.domain);
+    expect(domains).toEqual(expect.arrayContaining(['Unit', 'Abil', 'Effect', 'Actor', 'Weapon']));
+    expect(stats.unknownDomainCount, 'some real entry types resolved to no known domain').toBe(0);
+
+    // Pick a real unit that declares a parent and check inheritance end to end.
+    const withParent = index.search({ domains: ['Unit'], limit: 500 }).results.find((entry) => entry.parent !== null);
+    expect(withParent, 'expected at least one unit with a parent attribute').toBeDefined();
+
+    if (withParent !== undefined) {
+      const resolved = index.resolve('Unit', withParent.id);
+      // Either the parent resolved within the document, or it lives in a dependency — and
+      // the result must say which rather than silently returning a thin object.
+      expect(resolved.parentChain.length + resolved.unresolvedParents.length).toBeGreaterThan(0);
+      expect(resolved.fields.length).toBeGreaterThan(0);
+    }
+
+    await service.discard(opened.workspace.id);
+  }, 300_000);
 });

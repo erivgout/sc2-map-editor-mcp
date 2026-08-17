@@ -16,8 +16,8 @@ answer for a running build. As of now:
 |---|---|---|---|
 | Workspace staging | ✅ | ✅ | Unpacked document directories only |
 | Component inventory | ✅ | ❌ | `ComponentList`, `DocumentInfo`, dependencies — verified against real editor output |
+| GameData catalogs | ✅ | ❌ | Search, inspect, resolve inheritance, find references. Own document only — dependencies are not loaded |
 | MPQ archives (`.SC2Map`, `.SC2Mod`) | ⚠️ | ❌ | Code complete but **never compiled** — see [docs/native-helper.md](docs/native-helper.md) |
-| GameData catalogs | ❌ | ❌ | Phase 5–6 |
 | Galaxy scripts | ❌ | ❌ | Phase 5, 9 |
 | Triggers | ❌ | ❌ | Phase 11 |
 | Localization | ❌ | ❌ | Phase 10 |
@@ -47,6 +47,11 @@ packed archives with a clear error, and `capabilities.mpq` reports `false`.
 | `sc2_get_document_info` | yes | Name, author, mod type, icon, screenshots, dependencies |
 | `sc2_get_dependencies` | yes | Dependency chain in resolution order |
 | `sc2_list_component_types` | yes | Reference table of component type codes |
+| `sc2_list_catalog_domains` | yes | Catalog domains present, with entry counts |
+| `sc2_search_catalog` | yes | Find catalog objects by id, filtered by domain |
+| `sc2_get_catalog_object` | yes | One object's own declaration, plus verbatim XML |
+| `sc2_resolve_catalog_object` | yes | Effective values with inheritance, and where each came from |
+| `sc2_find_catalog_references` | yes | What refers to an object, and whether it is shared |
 | `sc2_list_files` | yes | Paginated listing of the staged tree |
 | `sc2_read_file` | yes | Read one staged file (text, or base64 for binary) |
 | `sc2_search_files` | yes | Literal substring search across staged text files |
