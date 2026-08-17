@@ -48,6 +48,15 @@ export interface CatalogField {
   readonly span: XmlSpan;
 }
 
+/**
+ * Where a catalog entry came from.
+ *
+ * `document` entries live in the open workspace and can be edited. `dependency` entries
+ * come from a loaded dependency archive: readable, inheritable from, and referenceable —
+ * but outside the workspace, so nothing may write to them.
+ */
+export type CatalogLayer = 'document' | 'dependency';
+
 export interface CatalogEntry {
   /** Concrete type from the element name, e.g. `CAbilEffectInstant`. */
   readonly ctype: string;
@@ -63,12 +72,17 @@ export interface CatalogEntry {
   readonly span: XmlSpan;
   /** Archive-style path of the file this entry came from. */
   readonly sourcePath: string;
+  readonly layer: CatalogLayer;
+  /** Name of the dependency it came from, or `null` for the document itself. */
+  readonly origin: string | null;
   /** 1-based line of the entry's opening tag, for human-facing output. */
   readonly line: number;
 }
 
 export interface CatalogFile {
   readonly path: string;
+  readonly layer: CatalogLayer;
+  readonly origin: string | null;
   readonly entries: readonly CatalogEntry[];
   /** Elements under `<Catalog>` that are not catalog entries. Reported, never dropped. */
   readonly unrecognizedElements: readonly string[];
@@ -109,7 +123,13 @@ function lineAt(source: string, offset: number): number {
  * @param sourcePath Archive-style path, recorded on every entry so a caller can find it.
  * @throws SC2Error `SC2_PARSE_ERROR` when the file is not well-formed or is not a catalog.
  */
-export function parseCatalogFile(source: string, sourcePath: string): CatalogFile {
+export function parseCatalogFile(
+  source: string,
+  sourcePath: string,
+  provenance: { layer?: CatalogLayer | undefined; origin?: string | null | undefined } = {},
+): CatalogFile {
+  const layer = provenance.layer ?? 'document';
+  const origin = provenance.origin ?? null;
   const document = parseXml(source, { path: sourcePath });
 
   if (document.root?.name !== 'Catalog') {
@@ -138,11 +158,13 @@ export function parseCatalogFile(source: string, sourcePath: string): CatalogFil
       fields: childElements(element).map(toField),
       span: element.span,
       sourcePath,
+      layer,
+      origin,
       line: lineAt(document.source, element.span.start),
     });
   }
 
-  return { path: sourcePath, entries, unrecognizedElements };
+  return { path: sourcePath, layer, origin, entries, unrecognizedElements };
 }
 
 /**

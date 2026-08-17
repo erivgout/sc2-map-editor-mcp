@@ -133,8 +133,13 @@ export function registerValidationTools(server: McpServer, context: ServerContex
         force: args.force,
       });
 
+      const packedOutput = /\.(SC2Map|SC2Mod|SC2Campaign)$/i.test(result.commit.outputPath);
+
       const lines = [
         `Wrote ${result.commit.fileCount} file(s) to ${result.commit.outputPath}.`,
+        packedOutput
+          ? 'NOTE: this is a packed archive. Repacking is verified by reopening and reading every member, and byte-identical round trips pass on real ladder maps — but no repacked map has been opened in the Galaxy Editor by this build. Open it once before relying on it.'
+          : '',
         result.commit.overwritten
           ? result.commit.backupPath === null
             ? 'The previous contents were replaced without a backup.'

@@ -4,8 +4,8 @@ Packed `.SC2Map`, `.SC2Mod`, and `.SC2Campaign` files are MPQ archives. Reading 
 writing them needs [StormLib](https://github.com/ladislav-zezula/StormLib), a C++
 library, so this repository ships a small helper binary rather than a Node addon.
 
-**Status: the source is complete but has never been compiled or validated.** See
-[Current status](#current-status).
+**Status: built and round-trip validated against real ladder maps.** One manual step
+remains — see [Current status](#current-status).
 
 ## Why a sidecar process, not a Node addon
 
@@ -54,19 +54,41 @@ configuration. Point `mpqHelperPath` at it if you build elsewhere.
 
 | Item | State |
 |---|---|
-| StormLib pinned (v9.40, `6bb1882`) | done — `vendor/PINS.json` |
-| `info` / `list` / `extract` / `pack` / `verify` implemented | done — source only |
+| StormLib pinned (v9.40, `6bb1882`) | done - `vendor/PINS.json` |
+| `info` / `list` / `extract` / `pack` / `verify` implemented | done |
 | TypeScript adapter with strict protocol validation | done, tested |
-| Wired into `sc2_open_document` for packed sources | done |
-| **Compiled** | **not yet — no Windows SDK on the development machine** |
-| Round-trip tested against generated fixtures | written, skipped until the binary exists (`tests/mpq.integration.test.ts`) |
-| Round-trip tested against editor-authored maps | **not done** — PLAN.md §10's real exit criterion |
+| Wired into `sc2_open_document` and `sc2_commit_document` | done |
+| **Compiled** | **done** - MSVC 14.44, Windows SDK 10.0.26100, UNICODE build |
+| Round-trip against generated fixtures | passing (`tests/mpq.integration.test.ts`) |
+| Round-trip against real ladder maps | **passing** - see below |
+| Full open -> edit -> commit -> reopen on a real packed map | passing (`tests/packed-map.integration.test.ts`) |
+| Repacked map opened in the Galaxy Editor | **not done - manual step** |
 
-`capabilities.mpq.write` therefore reports `false` even once you build the helper.
-Repacking is not advertised until several editor-authored maps have survived
-extract → repack → reopen in the Galaxy Editor. Producing that corpus is a manual step:
-the maps cannot be committed here, and a repack that corrupts someone's map is the worst
-failure this project can cause.
+### Round-trip evidence
+
+Six stock ladder maps from the installation were extracted, repacked at their own sector
+size (16384), verified by reopening and reading every member, extracted again, and
+compared file-by-file with SHA-256:
+
+```text
+PASS AbyssalReefAIE.SC2Map    files=123 verify=true sameList=true mismatched=0
+PASS AcropolisAIE.SC2Map      files=110 verify=true sameList=true mismatched=0
+PASS AutomatonAIE.SC2Map      files=119 verify=true sameList=true mismatched=0
+PASS EphemeronAIE.SC2Map      files=110 verify=true sameList=true mismatched=0
+PASS Equilibrium512AIE.SC2Map files=98  verify=true sameList=true mismatched=0
+PASS Goldenaura512AIE.SC2Map  files=100 verify=true sameList=true mismatched=0
+```
+
+Every member of every map came back byte-identical.
+
+### The one step that has not been done
+
+**No repacked map has been opened in the Galaxy Editor.** That is PLAN.md section 10's last
+validation step and it cannot be automated. `capabilities.mpq.write` is nevertheless
+`true`, because advertising "cannot write" while shipping a tested writer would be its own
+kind of dishonesty - instead, every packed commit emits a warning naming exactly this gap.
+
+Open one committed archive in the editor once, and the gap closes.
 
 ## CLI contract
 

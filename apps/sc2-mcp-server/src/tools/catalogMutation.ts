@@ -120,6 +120,23 @@ export function registerCatalogMutationTools(server: McpServer, context: ServerC
       });
     }
 
+    if (entry.layer === 'dependency') {
+      // The object is visible because a dependency was loaded, but it lives outside the
+      // workspace. Editing it would mean modifying another archive, which PLAN.md §25
+      // forbids outright.
+      throw new SC2Error(
+        'SC2_UNSUPPORTED_OPERATION',
+        `${catalogKey(domain, id)} is defined in the dependency "${entry.origin ?? 'unknown'}", not in this document.`,
+        {
+          workspaceId,
+          objectId: catalogKey(domain, id),
+          recoverable: true,
+          suggestedAction:
+            'Clone it into this document with sc2_clone_catalog_object and edit the copy. This server never modifies dependency archives.',
+        },
+      );
+    }
+
     const absolutePath = await workspaces.resolveWorkingPath(workspaceId, entry.sourcePath);
     return { path: entry.sourcePath, content: await readFile(absolutePath, 'utf8') };
   }
@@ -209,6 +226,26 @@ export function registerCatalogMutationTools(server: McpServer, context: ServerC
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
     toolHandler({ name: 'sc2_clone_catalog_object', logger }, async (args) => {
+      const index = await workspaces.getCatalogIndex(args.workspace_id);
+      const entry = index.get(args.domain, args.source_id);
+
+      if (entry !== null && entry.layer === 'dependency') {
+        // Cloning FROM a dependency is exactly the supported way to make one of its
+        // objects editable, but the copy has to land in this document, not in the
+        // dependency's own file.
+        throw new SC2Error(
+          'SC2_UNSUPPORTED_OPERATION',
+          `${catalogKey(args.domain, args.source_id)} lives in the dependency "${entry.origin ?? 'unknown'}"; copying it into this document is not implemented yet.`,
+          {
+            workspaceId: args.workspace_id,
+            objectId: catalogKey(args.domain, args.source_id),
+            recoverable: true,
+            suggestedAction:
+              'Create a new object with sc2_create_catalog_object using the dependency object as its parent, then patch only what differs.',
+          },
+        );
+      }
+
       const file = await readDeclaringFile(args.workspace_id, args.domain, args.source_id);
       const outcome = cloneCatalogEntry(file.content, args.domain, args.source_id, args.new_id, file.path, {
         newParent: args.new_parent,
@@ -258,9 +295,17 @@ export function registerCatalogMutationTools(server: McpServer, context: ServerC
       const index = await workspaces.getCatalogIndex(args.workspace_id);
 
       // Put it where its parent lives when we can; that is where a human would look.
+      // Only the DOCUMENT's own files are candidates. A dependency entry's sourcePath is
+      // a pseudo-path into another archive, and writing there would both fail and be
+      // forbidden (PLAN.md §25).
       let targetPath = args.file;
-      if (args.parent !== undefined) targetPath ??= index.get(domain, args.parent)?.sourcePath;
-      targetPath ??= index.search({ domains: [domain], limit: 1 }).results[0]?.sourcePath;
+      if (args.parent !== undefined) {
+        const parentEntry = index.get(domain, args.parent);
+        if (parentEntry?.layer === 'document') targetPath ??= parentEntry.sourcePath;
+      }
+      targetPath ??= index
+        .search({ domains: [domain], limit: 1000 })
+        .results.find((candidate) => candidate.layer === 'document')?.sourcePath;
       if (targetPath === undefined) {
         throw new SC2Error(
           'SC2_INVALID_ARGUMENT',

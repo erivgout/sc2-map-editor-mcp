@@ -361,8 +361,10 @@ describe('MCP server', () => {
     expect(entries).toHaveLength(1);
     expect(entries[0]?.name).toBe('Void Multi (Mod)');
     expect(entries[0]?.file).toBe('Mods/VoidMulti.SC2Mod');
-    // The model must not conclude a unit is missing merely because a dependency is unread.
-    expect(dependencies.structured['resolved']).toBe(false);
+    // Nothing here resolves, so no dependency catalogs are loaded — and the note must say
+    // so, or a model would read a later "not found" as "does not exist".
+    expect(dependencies.structured['loadedCount']).toBe(0);
+    expect(String(dependencies.structured['note'])).toContain('not in what was loaded');
   });
 
   it('reports a missing DocumentInfo as SC2_NOT_FOUND rather than inventing one', async () => {

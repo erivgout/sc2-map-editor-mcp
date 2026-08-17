@@ -21,12 +21,14 @@ import type { ServerConfig } from '../config.js';
 import { SC2Error } from '../errors.js';
 import { TransactionEngine, diffText, formatUnifiedDiff, type ChangedFile } from '../changes/index.js';
 import { copyDirectory, hashBuffer, walkFiles, type WalkOptions, type WalkedFile } from '../fs/index.js';
+import { defaultSearchRoots, resolveDependencies, type ResolvedDependency } from '../dependencies/index.js';
 import { CatalogIndex, type CatalogSource } from '../gamedata/index.js';
+import { findSc2DocumentsFolder } from '../install/index.js';
 import type { Logger } from '../logging.js';
 import { resolveArchiveMemberPath, type PathGuard } from '../paths.js';
 import { findTextTables, parseTextTable, type TextTable, type TextTableLocation } from '../text/index.js';
 import { validateDocument, type ValidationReport } from '../validation/index.js';
-import { commitDocument, type CommitResult } from './commit.js';
+import { commitDocument, type CommitResult, type MpqPacker } from './commit.js';
 import { inspectSource, type SourceInfo } from './source.js';
 import { WorkspaceStore } from './store.js';
 import { toDescriptor, type DocumentKind, type SC2WorkspaceDescriptor, type WorkspaceState } from './types.js';
@@ -46,6 +48,10 @@ export interface WorkspaceServiceOptions {
   readonly store: WorkspaceStore;
   readonly logger: Logger;
   readonly mpqExtractor?: MpqExtractor | undefined;
+  /** Present when the sc2mpq sidecar is available; enables packed output. */
+  readonly mpqPacker?: MpqPacker | undefined;
+  /** Reads an archive's sector size so a repack preserves it. */
+  readonly mpqInfo?: ((archivePath: string) => Promise<{ sectorSize: number }>) | undefined;
 }
 
 export interface OpenDocumentInput {
@@ -98,6 +104,8 @@ export class WorkspaceService {
   readonly #store: WorkspaceStore;
   readonly #logger: Logger;
   readonly #mpqExtractor: MpqExtractor | undefined;
+  readonly #mpqPacker: MpqPacker | undefined;
+  readonly #mpqInfo: ((archivePath: string) => Promise<{ sectorSize: number }>) | undefined;
   /**
    * Catalog indexes cached per workspace revision (PLAN.md §48).
    *
@@ -114,6 +122,8 @@ export class WorkspaceService {
     this.#store = options.store;
     this.#logger = options.logger;
     this.#mpqExtractor = options.mpqExtractor;
+    this.#mpqPacker = options.mpqPacker;
+    this.#mpqInfo = options.mpqInfo;
     this.#transactions = new TransactionEngine({
       store: options.store,
       logger: options.logger,
@@ -419,12 +429,21 @@ export class WorkspaceService {
       );
     });
 
-    const sources: CatalogSource[] = [];
+    // Dependencies first, document last: the index keeps the last definition, which is
+    // exactly SC2's own override order (PLAN.md §25).
+    const { sources: dependencySources } = await this.#dependencyCatalogSources(workspaceId);
+
+    const documentSources: CatalogSource[] = [];
     for (const file of catalogFiles) {
-      sources.push({ path: file.relativePath, content: await readFile(file.absolutePath, 'utf8') });
+      documentSources.push({
+        path: file.relativePath,
+        content: await readFile(file.absolutePath, 'utf8'),
+        layer: 'document',
+        origin: null,
+      });
     }
 
-    const index = CatalogIndex.build(sources);
+    const index = CatalogIndex.build([...dependencySources, ...documentSources]);
 
     // Only this workspace's stale entries are dropped; other workspaces keep theirs.
     for (const key of this.#catalogCache.keys()) {
@@ -508,6 +527,17 @@ export class WorkspaceService {
       });
     }
 
+    // Repack with the source archive's own sector size, so an unchanged document comes
+    // back byte-identical rather than silently reformatted (PLAN.md §10).
+    let sectorSize: number | undefined;
+    if (state.sourceKind === 'mpq' && this.#mpqInfo !== undefined) {
+      try {
+        sectorSize = (await this.#mpqInfo(state.sourcePath)).sectorSize;
+      } catch {
+        // The source may have moved; the packer's default is then the honest fallback.
+      }
+    }
+
     const commit = await commitDocument({
       outputPath,
       workingPath: this.#store.layoutFor(workspaceId).workingPath,
@@ -516,9 +546,86 @@ export class WorkspaceService {
       backup: input.backup ?? true,
       walkLimits: this.#walkLimits(),
       logger: this.#logger,
+      packer: this.#mpqPacker,
+      sectorSize,
     });
 
     return { commit, validation, sourceChanged: !sourceCheck.unchanged };
+  }
+
+  /**
+   * Resolves the document's declared dependencies to paths on disk (PLAN.md §25).
+   *
+   * Stock Blizzard dependencies live inside the installation's CASC store rather than as
+   * files, so they resolve to `in-casc` rather than `not-found` — the difference between
+   * "this build cannot read it" and "your map is broken".
+   */
+  async resolveDependencies(workspaceId: string): Promise<ResolvedDependency[]> {
+    const state = await this.#store.read(workspaceId);
+    const info = await this.getDocumentInfo(workspaceId);
+    if (info === null) return [];
+
+    const documents = await findSc2DocumentsFolder();
+    const searchRoots = defaultSearchRoots({
+      documentPath: state.sourcePath,
+      documentsRoot: documents?.root,
+      installRoot: this.#config.sc2InstallPath,
+    });
+
+    return resolveDependencies(info.dependencies, {
+      searchRoots,
+      installRoot: this.#config.sc2InstallPath,
+    });
+  }
+
+  /**
+   * Reads the catalog files of every dependency that resolved to an unpacked directory.
+   *
+   * Packed `.SC2Mod` archives need the MPQ helper and are skipped, as are CASC-backed
+   * stock dependencies. Each source is tagged so results can say which archive a value
+   * came from, and so mutation can refuse anything outside the workspace.
+   */
+  async #dependencyCatalogSources(workspaceId: string): Promise<{ sources: CatalogSource[]; skipped: ResolvedDependency[] }> {
+    const resolved = await this.resolveDependencies(workspaceId);
+    const sources: CatalogSource[] = [];
+    const skipped: ResolvedDependency[] = [];
+
+    for (const dependency of resolved) {
+      if (dependency.resolution !== 'resolved' || dependency.path === null || !dependency.isDirectory) {
+        skipped.push(dependency);
+        continue;
+      }
+
+      const origin = dependency.declaration.name ?? dependency.declaration.file ?? dependency.path;
+      let files;
+      try {
+        files = await walkFiles(dependency.path, this.#walkLimits());
+      } catch {
+        // A dependency we cannot walk is skipped, not fatal: the document itself is fine.
+        skipped.push(dependency);
+        continue;
+      }
+
+      for (const file of files) {
+        const segments = file.relativePath.toLowerCase().split('/');
+        const isCatalog =
+          segments.length >= 3 &&
+          (segments[0] ?? '').endsWith('.sc2data') &&
+          segments[1] === 'gamedata' &&
+          file.relativePath.toLowerCase().endsWith('.xml');
+        if (!isCatalog) continue;
+
+        sources.push({
+          // Prefixed so a dependency path can never be mistaken for a workspace path.
+          path: `${origin}:${file.relativePath}`,
+          content: await readFile(file.absolutePath, 'utf8'),
+          layer: 'dependency',
+          origin,
+        });
+      }
+    }
+
+    return { sources, skipped };
   }
 
   /** Locates the localized text tables in the staged document (PLAN.md §22). */

@@ -27,19 +27,20 @@ the sidecar binary is not there.
 | Placed objects (`Objects`) | ✅ | ❌ | XML, not binary. |
 | Regions | ✅ | ❌ | XML, not binary. |
 | Terrain | ⚠️ | ❌ | Descriptor only; bulk data reported by header, never decoded. |
-| MPQ archives | ⚠️ | ❌ | Implemented but **never compiled**. |
+| MPQ archives | ✅ | ⚠️ | Byte-identical round trips on real ladder maps; not yet opened in the editor. |
+| Local dependency archives | ✅ | ❌ | Unpacked `.SC2Mod` directories are indexed; contents are read-only. |
+| Stock (CASC) dependencies | ❌ | ❌ | Need a CASC reader; reported as `in-casc`, not missing. |
 | `Attributes`, `CustomAI` | ❌ | ❌ | XML, but not modelled. |
 | SC2Layout | ❌ | ❌ | Not started. |
 | `MapInfo` (binary) | ❌ | ❌ | Magic and version only. |
 
 ## Why each gap exists
 
-**MPQ archives — implemented, never compiled.** The `sc2mpq` sidecar is complete C++ over
-a pinned StormLib, and the TypeScript adapter is wired into `sc2_open_document`. It has
-never been built, because the development machine has `cl.exe` but no CRT headers and no
-Windows SDK. Even once built, `mpq.write` stays `false` until several editor-authored maps
-survive extract → repack → reopen (PLAN.md §10). A repack that corrupts someone's map is
-the worst failure this project can produce, so that gate does not move on a code review.
+**MPQ archives - one manual step outstanding.** The `sc2mpq` sidecar is built and working.
+Six real ladder maps extract, repack, verify, and re-extract byte-identically, and the full
+open -> edit -> commit -> reopen cycle passes on a real packed map. What has *not* happened
+is opening a repacked map in the Galaxy Editor - PLAN.md section 10's last validation step,
+which cannot be automated. Every packed commit emits a warning saying so.
 See [native-helper.md](native-helper.md).
 
 **Galaxy type checking.** The vendored `sc2-galaxy-lang` ships a `TypeChecker`, and it is
@@ -67,11 +68,17 @@ masks, cell flags, and sync data are binary formats whose layouts have not been
 established. Their four-character code, version, and size are reported because those are
 observable facts; nothing is inferred about the payload.
 
-**Dependency archives are never loaded.** Every catalog result covers the open document
-only. An object defined in `VoidMulti.SC2Mod` is not in the index, so "not found" means
-"not in this document" — every tool that could be misread on this point says so
-explicitly. This is the single most likely way to draw a wrong conclusion from this
-server's output.
+**Dependency archives: local ones load, stock ones cannot.** A dependency that resolves to
+an unpacked directory - a user's own `.SC2Mod` beside their map - is loaded, and its
+objects become visible for inheritance, references, and search, tagged with the archive
+they came from. They are *readable but not editable*: mutation refuses them and points at
+cloning instead, because PLAN.md section 25 forbids modifying dependency archives.
+
+Blizzard's stock dependencies are a different matter. There is no `Mods/` directory in a
+retail installation; `VoidMulti.SC2Mod` and friends live inside the CASC content store
+(`SC2Data/data` + `indices`). Reading those needs a CASC reader, which this build does not
+have. `sc2_get_dependencies` reports them as `in-casc` rather than `not-found`, because
+"this build cannot read it" and "your map is broken" are very different statements.
 
 ## Validation categories
 

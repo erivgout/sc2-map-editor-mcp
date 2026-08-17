@@ -19,6 +19,15 @@ import { SC2Error } from '../errors.js';
 import { copyDirectory, ensureDir, isDirectory, pathExists, removeTree, type WalkOptions } from '../fs/index.js';
 import type { Logger } from '../logging.js';
 
+/**
+ * Packs a staged tree into an MPQ archive. Supplied by the `sc2mpq` adapter when the
+ * sidecar is present; absent otherwise, and commit then refuses packed output.
+ */
+export interface MpqPacker {
+  pack(sourceDir: string, output: string, options: { sectorSize?: number | undefined }): Promise<{ fileCount: number }>;
+  verify(archivePath: string): Promise<{ ok: boolean; failures: readonly { path: string; reason: string }[] }>;
+}
+
 export interface CommitInput {
   /** Canonical, guarded destination path. */
   readonly outputPath: string;
@@ -31,6 +40,10 @@ export interface CommitInput {
   readonly backup: boolean;
   readonly walkLimits: WalkOptions;
   readonly logger: Logger;
+  /** Present when the MPQ sidecar is available. Required for packed output. */
+  readonly packer?: MpqPacker | undefined;
+  /** Sector size to repack with — normally the source archive's, so it round-trips. */
+  readonly sectorSize?: number | undefined;
 }
 
 export interface CommitResult {
@@ -54,17 +67,23 @@ function backupPathFor(outputPath: string, now: Date): string {
  * rather than writing a directory where the caller asked for an archive.
  */
 export async function commitDocument(input: CommitInput): Promise<CommitResult> {
-  if (input.sourceKind === 'mpq') {
+  // Output form follows the destination's extension, not the source's: a caller may
+  // legitimately unpack a map into a directory or pack a directory into an archive.
+  const wantsArchive = /\.(SC2Map|SC2Mod|SC2Campaign)$/i.test(input.outputPath) && input.packer !== undefined;
+
+  if (input.sourceKind === 'mpq' && input.packer === undefined) {
     throw new SC2Error(
       'SC2_UNSUPPORTED_OPERATION',
-      'Committing to a packed archive needs the sc2mpq helper, which is not available in this build.',
+      'Committing a packed document needs the sc2mpq helper, which is not available in this build.',
       {
         path: input.outputPath,
         recoverable: false,
-        suggestedAction: 'Commit to a directory path instead, or build the helper (see docs/native-helper.md).',
+        suggestedAction: 'Build the helper (see docs/native-helper.md), or commit to a directory path.',
       },
     );
   }
+
+  if (wantsArchive) return commitAsArchive(input);
 
   const destinationExists = await pathExists(input.outputPath);
   if (destinationExists && !input.overwrite) {
@@ -138,6 +157,101 @@ export async function commitDocument(input: CommitInput): Promise<CommitResult> 
   }
 
   input.logger.info('document committed', {
+    outputPath: input.outputPath,
+    fileCount,
+    overwritten: destinationExists,
+    backupPath,
+  });
+
+  return { outputPath: input.outputPath, fileCount, backupPath, overwritten: destinationExists };
+}
+
+/**
+ * Writes the staged tree as a packed MPQ archive.
+ *
+ * Same discipline as the directory path: build beside the destination, verify the result
+ * can be reopened and every member read, then move it into place. An archive that fails
+ * verification is deleted rather than delivered — a corrupt map that looks finished is the
+ * worst outcome this code can produce.
+ */
+async function commitAsArchive(input: CommitInput): Promise<CommitResult> {
+  const packer = input.packer;
+  if (packer === undefined) {
+    throw new SC2Error('SC2_UNSUPPORTED_OPERATION', 'No MPQ packer is available.', {
+      path: input.outputPath,
+      recoverable: false,
+    });
+  }
+
+  const destinationExists = await pathExists(input.outputPath);
+  if (destinationExists && !input.overwrite) {
+    throw new SC2Error('SC2_CONFLICT', `Something already exists at ${input.outputPath}.`, {
+      path: input.outputPath,
+      recoverable: true,
+      suggestedAction: 'Choose a different output path, or pass overwrite=true.',
+    });
+  }
+
+  const staging = `${input.outputPath}.incoming-${process.pid}-${Date.now()}`;
+  await removeTree(staging);
+  await ensureDir(path.dirname(input.outputPath));
+
+  let fileCount: number;
+  try {
+    const packed = await packer.pack(input.workingPath, staging, { sectorSize: input.sectorSize });
+    fileCount = packed.fileCount;
+
+    // Reopen and read every member before this archive is allowed anywhere near the
+    // destination (PLAN.md §9 commit steps 4-5).
+    const verified = await packer.verify(staging);
+    if (!verified.ok) {
+      throw new SC2Error('SC2_PACK_FAILED', `The packed archive failed verification: ${verified.failures.length} member(s) could not be read.`, {
+        path: input.outputPath,
+        recoverable: false,
+        context: { failures: verified.failures.slice(0, 10) },
+      });
+    }
+  } catch (error) {
+    await removeTree(staging);
+    if (error instanceof SC2Error) throw error;
+    throw new SC2Error(
+      'SC2_PACK_FAILED',
+      `Could not pack the document; nothing at ${input.outputPath} was changed.`,
+      { path: input.outputPath, recoverable: false },
+      { cause: error },
+    );
+  }
+
+  let backupPath: string | null = null;
+  try {
+    if (destinationExists) {
+      if (input.backup) {
+        backupPath = backupPathFor(input.outputPath, new Date());
+        await rename(input.outputPath, backupPath);
+      } else {
+        await removeTree(input.outputPath);
+      }
+    }
+    await rename(staging, input.outputPath);
+  } catch (error) {
+    await removeTree(staging);
+    // Put the original back if the backup move succeeded but the final rename did not.
+    const restorable = backupPath !== null && !(await pathExists(input.outputPath));
+    if (restorable && backupPath !== null) await rename(backupPath, input.outputPath).catch(() => {});
+
+    throw new SC2Error(
+      'SC2_IO_ERROR',
+      `Could not move the packed archive into place at ${input.outputPath}.`,
+      {
+        path: input.outputPath,
+        recoverable: false,
+        ...(restorable || backupPath === null ? {} : { suggestedAction: `The previous contents are at ${backupPath}.` }),
+      },
+      { cause: error },
+    );
+  }
+
+  input.logger.info('document committed as archive', {
     outputPath: input.outputPath,
     fileCount,
     overwritten: destinationExists,

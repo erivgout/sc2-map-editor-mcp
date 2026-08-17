@@ -138,33 +138,54 @@ export function registerComponentTools(server: McpServer, context: ServerContext
         'Returns the document\'s dependency chain in declaration order, which is also the order SC2 resolves them in: later entries override earlier ones. Each entry has a Battle.net identity and a local file path. This server never modifies installed Blizzard dependency archives — only the open document.',
       inputSchema: z.object({ workspace_id: WorkspaceIdSchema }),
       outputSchema: z.object({
-        dependencies: z.array(DependencySchema),
-        /** True once dependency archives are actually loaded and their contents indexed. */
-        resolved: z.boolean(),
+        dependencies: z.array(
+          DependencySchema.extend({
+            resolution: z.enum(['resolved', 'in-casc', 'not-found']),
+            path: z.string().nullable(),
+            isDirectory: z.boolean(),
+            loaded: z.boolean(),
+            reason: z.string().nullable(),
+          }),
+        ),
+        loadedCount: z.number().int(),
         note: z.string(),
       }),
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     toolHandler({ name: 'sc2_get_dependencies', logger }, async (args) => {
-      const info = await workspaces.getDocumentInfo(args.workspace_id);
-      const dependencies = info?.dependencies ?? [];
+      const resolvedDependencies = await workspaces.resolveDependencies(args.workspace_id);
 
-      // Being explicit about this matters: a model that assumes these are loaded would
-      // conclude a unit is missing when it merely lives in a dependency we have not read.
+      const dependencies = resolvedDependencies.map((entry) => ({
+        ...entry.declaration,
+        resolution: entry.resolution,
+        path: entry.path,
+        isDirectory: entry.isDirectory,
+        // Only unpacked directories are actually indexed; a packed .SC2Mod needs the MPQ
+        // helper, which this build does not have.
+        loaded: entry.resolution === 'resolved' && entry.isDirectory,
+        reason: entry.reason,
+      }));
+
+      const loadedCount = dependencies.filter((entry) => entry.loaded).length;
       const note =
-        'These are the declared dependencies only. This build does not load or index their contents, so inherited GameData from them is not visible yet.';
+        dependencies.length > 0 && loadedCount === dependencies.length
+          ? 'Every dependency was loaded, so catalog results include their objects.'
+          : 'Objects from dependencies that were not loaded are invisible to the catalog tools. There, "not found" means "not in what was loaded" rather than "does not exist".';
 
       const lines =
         dependencies.length === 0
           ? ['This document declares no dependencies.']
           : [
-              `${dependencies.length} dependency/dependencies, in resolution order (later entries win):`,
-              ...dependencies.map((dependency, index) => `  ${index + 1}. ${dependency.name ?? '(unnamed)'} — ${dependency.file ?? '(no file path)'}`),
+              `${dependencies.length} dependency/dependencies, in resolution order (later entries win); ${loadedCount} loaded:`,
+              ...dependencies.map(
+                (dependency, index) =>
+                  `  ${index + 1}. ${dependency.name ?? '(unnamed)'} — ${dependency.resolution.toUpperCase()}${dependency.path === null ? '' : ` — ${dependency.path}`}${dependency.reason === null ? '' : `\n       ${dependency.reason}`}`,
+              ),
               '',
               note,
             ];
 
-      return ok(lines.join('\n'), { dependencies, resolved: false, note });
+      return ok(lines.join('\n'), { dependencies, loadedCount, note });
     }),
   );
 

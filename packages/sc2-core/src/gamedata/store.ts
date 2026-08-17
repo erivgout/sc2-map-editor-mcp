@@ -13,7 +13,7 @@
  */
 
 import { SC2Error } from '../errors.js';
-import { parseCatalogFile, walkFields, type CatalogEntry, type CatalogField } from './catalog.js';
+import { parseCatalogFile, walkFields, type CatalogEntry, type CatalogField, type CatalogLayer } from './catalog.js';
 
 /** `Unit/Marine` — the canonical way to name an entry. */
 export function catalogKey(domain: string, id: string): string {
@@ -37,6 +37,8 @@ export interface CatalogObjectSummary {
   readonly sourcePath: string;
   readonly line: number;
   readonly fieldCount: number;
+  readonly layer: CatalogLayer;
+  readonly origin: string | null;
 }
 
 export interface ResolvedFieldValue {
@@ -48,6 +50,8 @@ export interface ResolvedFieldValue {
   readonly definedBy: string;
   readonly sourcePath: string;
   readonly line: number;
+  readonly layer: CatalogLayer;
+  readonly origin: string | null;
 }
 
 export interface ResolvedCatalogObject {
@@ -80,12 +84,26 @@ export interface CatalogIndexStats {
   readonly domainCount: number;
   /** Entries whose element name matched no known domain. */
   readonly unknownDomainCount: number;
+  /** Entries owned by the open document, i.e. the editable ones. */
+  readonly documentEntryCount: number;
+  /** Entries contributed by loaded dependencies. */
+  readonly dependencyEntryCount: number;
+  /** Names of the dependencies whose catalogs were loaded. */
+  readonly loadedDependencies: readonly string[];
 }
 
 /** One parsed catalog file plus the diagnostics from reading it. */
 export interface CatalogSource {
   readonly path: string;
   readonly content: string;
+  /**
+   * Which layer this file belongs to. Sources are supplied dependency-first, document
+   * last, so the existing last-definition-wins rule gives the document priority — the
+   * same order SC2 itself resolves in (PLAN.md §25).
+   */
+  readonly layer?: CatalogLayer | undefined;
+  /** Dependency name, for reporting where an inherited value actually came from. */
+  readonly origin?: string | null | undefined;
 }
 
 export interface CatalogIndexDiagnostic {
@@ -124,7 +142,7 @@ export class CatalogIndex {
       index.#fileCount += 1;
       let file;
       try {
-        file = parseCatalogFile(source.content, source.path);
+        file = parseCatalogFile(source.content, source.path, { layer: source.layer, origin: source.origin });
       } catch (error) {
         index.#diagnostics.push({
           severity: 'error',
@@ -190,6 +208,11 @@ export class CatalogIndex {
       entryCount: this.#byKey.size,
       domainCount: this.domains().length,
       unknownDomainCount: this.#all.filter((entry) => entry.domain === null && entry.id !== null).length,
+      documentEntryCount: [...this.#byKey.values()].filter((entry) => entry.layer === 'document').length,
+      dependencyEntryCount: [...this.#byKey.values()].filter((entry) => entry.layer === 'dependency').length,
+      loadedDependencies: [
+        ...new Set(this.#all.flatMap((entry) => (entry.origin === null ? [] : [entry.origin]))),
+      ].sort(),
     };
   }
 
@@ -250,6 +273,8 @@ export class CatalogIndex {
         sourcePath: entry.sourcePath,
         line: entry.line,
         fieldCount: entry.fields.length,
+        layer: entry.layer,
+        origin: entry.origin,
       })),
     };
   }
@@ -313,6 +338,8 @@ export class CatalogIndex {
           definedBy: catalogKey(entry.domain ?? domain, entry.id ?? ''),
           sourcePath: entry.sourcePath,
           line: entry.line,
+          layer: entry.layer,
+          origin: entry.origin,
         });
       }
     }

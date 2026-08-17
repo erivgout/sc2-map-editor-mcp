@@ -4,6 +4,7 @@
  */
 
 import { SC2Error } from '../errors.js';
+import type { MpqPacker } from '../workspace/commit.js';
 import type { MpqExtractor } from '../workspace/service.js';
 import type { MpqHelper } from './helper.js';
 
@@ -38,6 +39,26 @@ export function createMpqExtractor(helper: MpqHelper): MpqExtractor {
       }
 
       return { fileCount: result.extractedCount };
+    },
+  };
+}
+
+/**
+ * Bridges {@link MpqHelper} to the {@link MpqPacker} interface the commit flow needs.
+ *
+ * `pack` already deletes a half-written archive on failure, and `verify` reopens and reads
+ * every member, so commit's own verification step is a genuine reopen rather than a
+ * restatement of what pack believed.
+ */
+export function createMpqPacker(helper: MpqHelper): MpqPacker {
+  return {
+    async pack(sourceDir, output, options) {
+      const result = await helper.pack(sourceDir, output, { sectorSize: options.sectorSize });
+      return { fileCount: result.fileCount };
+    },
+    async verify(archivePath) {
+      const result = await helper.verify(archivePath);
+      return { ok: result.ok, failures: result.failures };
     },
   };
 }

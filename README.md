@@ -18,7 +18,7 @@ answer for a running build. As of now:
 | Workspace staging | ✅ | ✅ | Unpacked document directories only |
 | Component inventory | ✅ | ❌ | `ComponentList`, `DocumentInfo`, dependencies — verified against real editor output |
 | GameData catalogs | ✅ | ✅ | Search, inspect, resolve inheritance, find references, patch/clone/create/delete. Own document only — dependencies are not loaded |
-| MPQ archives (`.SC2Map`, `.SC2Mod`) | ⚠️ | ❌ | Code complete but **never compiled** — see [docs/native-helper.md](docs/native-helper.md) |
+| MPQ archives (`.SC2Map`, `.SC2Mod`) | ✅ | ⚠️ | Byte-identical round trips on real ladder maps; **not yet opened in the editor** — see [docs/native-helper.md](docs/native-helper.md) |
 | Galaxy scripts | ✅ | ✅ | Parse, symbols, syntax diagnostics, safe text patching. **No type checking** — needs the game's natives. Requires the vendored toolkit to be built |
 | Triggers | ✅ | ⚠️ | Structure, names, search. Renaming only — structural editing deliberately not implemented |
 | Localization | ✅ | ✅ | Text tables, preserving BOM and CRLF exactly |
@@ -30,15 +30,16 @@ answer for a running build. As of now:
 Why the gaps are where they are, and what "⚠️" means in each row:
 [docs/capabilities.md](docs/capabilities.md).
 
-⚠️ The `sc2mpq` helper that reads packed archives is written and wired in, but building it
-needs a C++ toolchain plus the Windows SDK, which was unavailable on the machine this was
-developed on. Until it is compiled and round-trip tested, `sc2_open_document` refuses
-packed archives with a clear error, and `capabilities.mpq` reports `false`.
+⚠️ Packed archives work, but no repacked map has been opened in the Galaxy Editor yet -
+the one validation step that cannot be automated. Every packed commit says so. Building the
+helper needs a C++ toolchain and the Windows SDK (`scripts/build-native.ps1`); without it
+`capabilities.mpq` reports `false` and packed archives are refused with a clear error.
 
-**Dependency archives are never loaded.** Every catalog answer covers the open document
-only, so "not found" means "not in this document" — not "does not exist". This is the
-easiest way to draw a wrong conclusion from the server's output, and every tool that could
-be misread on it says so in its result.
+**Dependencies: local ones load, Blizzard's do not.** A `.SC2Mod` directory beside your map
+is indexed, and its objects become visible for inheritance and references - read-only, since
+this server never modifies dependency archives. Blizzard's stock mods live inside the
+installation's CASC store, which this build cannot read; they are reported as `in-casc`
+rather than missing, because that is a very different thing from your map being broken.
 
 ### Tools
 

@@ -14,6 +14,7 @@ import {
   WorkspaceStore,
   createLogger,
   createMpqExtractor,
+  createMpqPacker,
   deriveCapabilities,
   probeGalaxyToolkit,
   detectInstallations,
@@ -88,14 +89,16 @@ export async function createContext(options: CreateContextOptions): Promise<Serv
     logger.info('sc2mpq helper unavailable', { reason: mpqHelper.reason, searched: mpqHelper.searched });
   }
 
+  const helper = mpqHelper.available ? MpqHelper.fromProbe(mpqHelper, config.processTimeoutMs) : null;
+
   const workspaces = new WorkspaceService({
     config,
     pathGuard,
     store,
     logger,
-    mpqExtractor: mpqHelper.available
-      ? createMpqExtractor(MpqHelper.fromProbe(mpqHelper, config.processTimeoutMs))
-      : undefined,
+    mpqExtractor: helper === null ? undefined : createMpqExtractor(helper),
+    mpqPacker: helper === null ? undefined : createMpqPacker(helper),
+    mpqInfo: helper === null ? undefined : async (archivePath) => ({ sectorSize: (await helper.info(archivePath)).sectorSize }),
   });
 
   let installations: Sc2Installation[] = [];
