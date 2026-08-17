@@ -8,7 +8,7 @@
  * verify. The workspace cases cover Phase 2's exit criterion.
  */
 
-import { writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { Client } from '@modelcontextprotocol/client';
@@ -99,7 +99,10 @@ describe('MCP server', () => {
     const names = tools.map((tool) => tool.name).sort();
 
     expect(names).toEqual([
+      'sc2_clone_catalog_object',
+      'sc2_create_catalog_object',
       'sc2_create_snapshot',
+      'sc2_delete_catalog_object',
       'sc2_detect_installations',
       'sc2_diff_workspace',
       'sc2_discard_workspace',
@@ -117,6 +120,7 @@ describe('MCP server', () => {
       'sc2_list_snapshots',
       'sc2_list_workspaces',
       'sc2_open_document',
+      'sc2_patch_catalog_object',
       'sc2_read_file',
       'sc2_resolve_catalog_object',
       'sc2_restore_snapshot',
@@ -158,7 +162,7 @@ describe('MCP server', () => {
     const capabilities = outcome.structured['capabilities'] as Record<string, { read: boolean; write: boolean }>;
     // Workspace staging and catalog reading work in this build...
     expect(capabilities['workspace']).toEqual({ read: true, write: true });
-    expect(capabilities['gamedata']).toEqual({ read: true, write: false, inheritance: true });
+    expect(capabilities['gamedata']).toEqual({ read: true, write: true, inheritance: true });
     // ...and nothing that depends on an unbuilt backend claims to.
     expect(capabilities['mpq']).toEqual({ read: false, write: false });
     expect(capabilities['terrain']).toEqual({ read: false, write: false });
@@ -522,6 +526,232 @@ describe('MCP server', () => {
     });
     expect(outcome.isError).toBe(true);
     expect((outcome.structured['error'] as Record<string, unknown>)['code']).toBe('SC2_NOT_FOUND');
+  });
+
+  it('previews a catalog edit, applies it, and can revert it', async () => {
+    const opened = await callTool(harness.client, 'sc2_open_document', { source_path: harness.sourceDir });
+    const workspaceId = (opened.structured['workspace'] as Record<string, unknown>)['id'] as string;
+
+    const patchArgs = {
+      workspace_id: workspaceId,
+      domain: 'Unit',
+      id: 'TestMarine',
+      patches: [{ op: 'set', path: 'LifeMax', value: '125' }],
+    };
+
+    // Default is a dry run: nothing is written unless dry_run=false is explicit.
+    const preview = await callTool(harness.client, 'sc2_patch_catalog_object', patchArgs);
+    expect(preview.structured['dryRun']).toBe(true);
+    expect(preview.structured['revisionAfter']).toBe(preview.structured['revisionBefore']);
+    const previewDiff = (preview.structured['filesChanged'] as { diff: string }[])[0]?.diff ?? '';
+    expect(previewDiff).toContain('-        <LifeMax value="60"/>');
+    expect(previewDiff).toContain('+        <LifeMax value="125"/>');
+
+    const stillOriginal = await callTool(harness.client, 'sc2_get_catalog_object', {
+      workspace_id: workspaceId,
+      domain: 'Unit',
+      id: 'TestMarine',
+    });
+    expect(stillOriginal.structured['rawXml']).toContain('<LifeMax value="60"/>');
+
+    const applied = await callTool(harness.client, 'sc2_patch_catalog_object', { ...patchArgs, dry_run: false });
+    expect(applied.structured['dryRun']).toBe(false);
+    expect(applied.structured['revisionAfter']).toBe(1);
+    const changeId = applied.structured['changeId'] as string;
+
+    // The catalog index must reflect the edit, not a cached pre-change view.
+    const afterEdit = await callTool(harness.client, 'sc2_get_catalog_object', {
+      workspace_id: workspaceId,
+      domain: 'Unit',
+      id: 'TestMarine',
+    });
+    expect(afterEdit.structured['rawXml']).toContain('<LifeMax value="125"/>');
+
+    const reverted = await callTool(harness.client, 'sc2_revert_change', {
+      workspace_id: workspaceId,
+      change_id: changeId,
+    });
+    expect(reverted.isError).toBe(false);
+
+    const afterRevert = await callTool(harness.client, 'sc2_get_catalog_object', {
+      workspace_id: workspaceId,
+      domain: 'Unit',
+      id: 'TestMarine',
+    });
+    expect(afterRevert.structured['rawXml']).toContain('<LifeMax value="60"/>');
+  });
+
+  it('warns when patching an object other objects share', async () => {
+    const opened = await callTool(harness.client, 'sc2_open_document', { source_path: harness.sourceDir });
+    const workspaceId = (opened.structured['workspace'] as Record<string, unknown>)['id'] as string;
+
+    // TestRifle is referenced by two units in the fixture.
+    const preview = await callTool(harness.client, 'sc2_patch_catalog_object', {
+      workspace_id: workspaceId,
+      domain: 'Weapon',
+      id: 'TestRifle',
+      patches: [{ op: 'set', path: 'DisplayEffect', value: 'Something' }],
+    });
+
+    const diagnostics = preview.structured['diagnostics'] as { severity: string; message: string }[];
+    expect(diagnostics.some((entry) => entry.severity === 'warning' && entry.message.includes('referenced by 2'))).toBe(true);
+  });
+
+  it('refuses a stale expected_revision', async () => {
+    const opened = await callTool(harness.client, 'sc2_open_document', { source_path: harness.sourceDir });
+    const workspaceId = (opened.structured['workspace'] as Record<string, unknown>)['id'] as string;
+
+    await callTool(harness.client, 'sc2_patch_catalog_object', {
+      workspace_id: workspaceId,
+      domain: 'Unit',
+      id: 'TestMarine',
+      patches: [{ op: 'set', path: 'LifeMax', value: '70' }],
+      dry_run: false,
+    });
+
+    const stale = await callTool(harness.client, 'sc2_patch_catalog_object', {
+      workspace_id: workspaceId,
+      domain: 'Unit',
+      id: 'TestMarine',
+      patches: [{ op: 'set', path: 'LifeMax', value: '80' }],
+      expected_revision: 0,
+      dry_run: false,
+    });
+
+    expect(stale.isError).toBe(true);
+    expect((stale.structured['error'] as Record<string, unknown>)['code']).toBe('SC2_CONFLICT');
+  });
+
+  it('clones a shared weapon so one unit can diverge from the other', async () => {
+    const opened = await callTool(harness.client, 'sc2_open_document', { source_path: harness.sourceDir });
+    const workspaceId = (opened.structured['workspace'] as Record<string, unknown>)['id'] as string;
+
+    await callTool(harness.client, 'sc2_clone_catalog_object', {
+      workspace_id: workspaceId,
+      domain: 'Weapon',
+      source_id: 'TestRifle',
+      new_id: 'TestRailRifle',
+      dry_run: false,
+    });
+
+    await callTool(harness.client, 'sc2_patch_catalog_object', {
+      workspace_id: workspaceId,
+      domain: 'Unit',
+      id: 'TestMarine',
+      patches: [{ op: 'set_link', path: 'WeaponArray[0]', value: 'TestRailRifle' }],
+      dry_run: false,
+    });
+
+    // The other unit still points at the original — which is the whole point of cloning.
+    const reaper = await callTool(harness.client, 'sc2_get_catalog_object', {
+      workspace_id: workspaceId,
+      domain: 'Unit',
+      id: 'TestReaper',
+    });
+    expect(reaper.structured['rawXml']).toContain('Link="TestRifle"');
+
+    const references = await callTool(harness.client, 'sc2_find_catalog_references', {
+      workspace_id: workspaceId,
+      domain: 'Weapon',
+      id: 'TestRifle',
+    });
+    expect(references.structured['shared']).toBe(false);
+  });
+
+  it('creates a new object with a parent and inherits through it', async () => {
+    const opened = await callTool(harness.client, 'sc2_open_document', { source_path: harness.sourceDir });
+    const workspaceId = (opened.structured['workspace'] as Record<string, unknown>)['id'] as string;
+
+    await callTool(harness.client, 'sc2_create_catalog_object', {
+      workspace_id: workspaceId,
+      ctype: 'CUnit',
+      id: 'TestGhost',
+      parent: 'TestMarineBase',
+      dry_run: false,
+    });
+
+    const resolved = await callTool(harness.client, 'sc2_resolve_catalog_object', {
+      workspace_id: workspaceId,
+      domain: 'Unit',
+      id: 'TestGhost',
+    });
+    const fields = resolved.structured['fields'] as { path: string; value: string; definedBy: string }[];
+    expect(fields.find((field) => field.path === 'Speed')).toMatchObject({
+      value: '2.25',
+      definedBy: 'Unit/TestMarineBase',
+    });
+  });
+
+  it('refuses to delete a referenced object, listing what would break', async () => {
+    const opened = await callTool(harness.client, 'sc2_open_document', { source_path: harness.sourceDir });
+    const workspaceId = (opened.structured['workspace'] as Record<string, unknown>)['id'] as string;
+
+    const outcome = await callTool(harness.client, 'sc2_delete_catalog_object', {
+      workspace_id: workspaceId,
+      domain: 'Weapon',
+      id: 'TestRifle',
+      dry_run: false,
+    });
+
+    expect(outcome.isError).toBe(true);
+    const error = outcome.structured['error'] as Record<string, unknown>;
+    expect(error['code']).toBe('SC2_BROKEN_REFERENCE');
+    expect(String((error['context'] as Record<string, unknown>)['references'])).toContain('Unit/TestMarine');
+  });
+
+  it('deletes an unreferenced object without complaint', async () => {
+    const opened = await callTool(harness.client, 'sc2_open_document', { source_path: harness.sourceDir });
+    const workspaceId = (opened.structured['workspace'] as Record<string, unknown>)['id'] as string;
+
+    const outcome = await callTool(harness.client, 'sc2_delete_catalog_object', {
+      workspace_id: workspaceId,
+      domain: 'Unit',
+      id: 'TestReaper',
+      dry_run: false,
+    });
+
+    expect(outcome.isError).toBe(false);
+    const search = await callTool(harness.client, 'sc2_search_catalog', { workspace_id: workspaceId, query: 'TestReaper' });
+    expect(search.structured['total']).toBe(0);
+  });
+
+  it('refuses every mutation on a read-only workspace', async () => {
+    const opened = await callTool(harness.client, 'sc2_open_document', {
+      source_path: harness.sourceDir,
+      read_only: true,
+    });
+    const workspaceId = (opened.structured['workspace'] as Record<string, unknown>)['id'] as string;
+
+    const outcome = await callTool(harness.client, 'sc2_patch_catalog_object', {
+      workspace_id: workspaceId,
+      domain: 'Unit',
+      id: 'TestMarine',
+      patches: [{ op: 'set', path: 'LifeMax', value: '1' }],
+      dry_run: false,
+    });
+
+    expect(outcome.isError).toBe(true);
+    expect((outcome.structured['error'] as Record<string, unknown>)['code']).toBe('SC2_UNSUPPORTED_OPERATION');
+  });
+
+  it('never modifies the source document, only the staging copy', async () => {
+    const opened = await callTool(harness.client, 'sc2_open_document', { source_path: harness.sourceDir });
+    const workspaceId = (opened.structured['workspace'] as Record<string, unknown>)['id'] as string;
+
+    await callTool(harness.client, 'sc2_patch_catalog_object', {
+      workspace_id: workspaceId,
+      domain: 'Unit',
+      id: 'TestMarine',
+      patches: [{ op: 'set', path: 'LifeMax', value: '999' }],
+      dry_run: false,
+    });
+
+    // The single most important invariant in the whole server.
+    const sourceContent = await readFile(
+      path.join(harness.sourceDir, 'Base.SC2Data', 'GameData', 'UnitData.xml'),
+      'utf8',
+    );
+    expect(sourceContent).toBe(DOCUMENT_FIXTURE['Base.SC2Data/GameData/UnitData.xml']);
   });
 
   it('lists workspaces so an id can be recovered after a reconnect', async () => {

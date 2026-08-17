@@ -69,7 +69,7 @@ export const IMPLEMENTED: ServerCapabilities = Object.freeze({
   // own span-tracking XML parser, because the toolkit's CatalogStore indexes declarations
   // only and offers neither field values nor inheritance. Spans are also what Phase 8's
   // in-place mutations need. See docs/adr/0002-own-catalog-layer.md.
-  gamedata: { read: true, write: false, inheritance: true },
+  gamedata: { read: true, write: true, inheritance: true },
   // Phases 5, 9.
   galaxy: { read: false, write: false, typecheck: false },
   // Phases 5, 11.

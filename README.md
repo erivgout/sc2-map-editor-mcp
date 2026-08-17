@@ -16,7 +16,7 @@ answer for a running build. As of now:
 |---|---|---|---|
 | Workspace staging | ✅ | ✅ | Unpacked document directories only |
 | Component inventory | ✅ | ❌ | `ComponentList`, `DocumentInfo`, dependencies — verified against real editor output |
-| GameData catalogs | ✅ | ❌ | Search, inspect, resolve inheritance, find references. Own document only — dependencies are not loaded |
+| GameData catalogs | ✅ | ✅ | Search, inspect, resolve inheritance, find references, patch/clone/create/delete. Own document only — dependencies are not loaded |
 | MPQ archives (`.SC2Map`, `.SC2Mod`) | ⚠️ | ❌ | Code complete but **never compiled** — see [docs/native-helper.md](docs/native-helper.md) |
 | Galaxy scripts | ❌ | ❌ | Phase 5, 9 |
 | Triggers | ❌ | ❌ | Phase 11 |
@@ -52,6 +52,10 @@ packed archives with a clear error, and `capabilities.mpq` reports `false`.
 | `sc2_get_catalog_object` | yes | One object's own declaration, plus verbatim XML |
 | `sc2_resolve_catalog_object` | yes | Effective values with inheritance, and where each came from |
 | `sc2_find_catalog_references` | yes | What refers to an object, and whether it is shared |
+| `sc2_patch_catalog_object` | no | Field-level edits by path, with shared-object warnings |
+| `sc2_clone_catalog_object` | no | Copy an object under a new id, byte-for-byte |
+| `sc2_create_catalog_object` | no | Add a new object, ideally with a parent |
+| `sc2_delete_catalog_object` | no | Remove an object; refuses while referenced |
 | `sc2_diff_workspace` | yes | Unified diff against the source, or against a snapshot |
 | `sc2_get_changes` | yes | Change history, with the snapshot taken before each |
 | `sc2_revert_change` | no | Undo the most recent change |
