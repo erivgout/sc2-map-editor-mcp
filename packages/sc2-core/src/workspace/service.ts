@@ -24,6 +24,7 @@ import { copyDirectory, hashBuffer, walkFiles, type WalkOptions, type WalkedFile
 import { CatalogIndex, type CatalogSource } from '../gamedata/index.js';
 import type { Logger } from '../logging.js';
 import { resolveArchiveMemberPath, type PathGuard } from '../paths.js';
+import { findTextTables, parseTextTable, type TextTable, type TextTableLocation } from '../text/index.js';
 import { inspectSource, type SourceInfo } from './source.js';
 import { WorkspaceStore } from './store.js';
 import { toDescriptor, type DocumentKind, type SC2WorkspaceDescriptor, type WorkspaceState } from './types.js';
@@ -433,6 +434,34 @@ export class WorkspaceService {
     this.#logger.debug('catalog index built', { workspaceId, revision: state.revision, ...stats });
 
     return index;
+  }
+
+  /** Locates the localized text tables in the staged document (PLAN.md §22). */
+  async listTextTables(workspaceId: string): Promise<TextTableLocation[]> {
+    await this.#store.read(workspaceId);
+    const layout = this.#store.layoutFor(workspaceId);
+    const files = await walkFiles(layout.workingPath, this.#walkLimits());
+    return findTextTables(files.map((file) => ({ relativePath: file.relativePath, size: file.size })));
+  }
+
+  /** Reads and parses one text table by its archive-style path. */
+  async getTextTable(workspaceId: string, tablePath: string): Promise<TextTable> {
+    const absolutePath = await this.resolveWorkingPath(workspaceId, tablePath);
+    let source: string;
+    try {
+      source = await readFile(absolutePath, 'utf8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        throw new SC2Error('SC2_NOT_FOUND', `No such text table: ${tablePath}`, {
+          workspaceId,
+          path: tablePath,
+          recoverable: true,
+          suggestedAction: 'Use sc2_list_text_tables to see which tables exist.',
+        });
+      }
+      throw error;
+    }
+    return parseTextTable(source, tablePath);
   }
 
   /**

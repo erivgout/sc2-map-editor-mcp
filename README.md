@@ -20,7 +20,7 @@ answer for a running build. As of now:
 | MPQ archives (`.SC2Map`, `.SC2Mod`) | ⚠️ | ❌ | Code complete but **never compiled** — see [docs/native-helper.md](docs/native-helper.md) |
 | Galaxy scripts | ❌ | ❌ | Phase 5, 9 |
 | Triggers | ❌ | ❌ | Phase 11 |
-| Localization | ❌ | ❌ | Phase 10 |
+| Localization | ✅ | ✅ | Text tables, preserving BOM and CRLF exactly |
 | SC2Layout | ❌ | ❌ | Phase 10 |
 | Placed objects / regions | ❌ | ❌ | Phase 15 |
 | Terrain | ❌ | ❌ | Phase 16 |
@@ -56,6 +56,13 @@ packed archives with a clear error, and `capabilities.mpq` reports `false`.
 | `sc2_clone_catalog_object` | no | Copy an object under a new id, byte-for-byte |
 | `sc2_create_catalog_object` | no | Add a new object, ideally with a parent |
 | `sc2_delete_catalog_object` | no | Remove an object; refuses while referenced |
+| `sc2_list_locales` | yes | Locales and text tables present |
+| `sc2_search_text_keys` | yes | Search a text table by key or value |
+| `sc2_get_text_value` | yes | Read one localized string |
+| `sc2_set_text_value` | no | Create or update localized strings |
+| `sc2_delete_text_key` | no | Remove localized strings |
+| `sc2_copy_text_key` | no | Copy strings between keys or locales |
+| `sc2_find_missing_localization` | yes | Catalog objects with no display name |
 | `sc2_diff_workspace` | yes | Unified diff against the source, or against a snapshot |
 | `sc2_get_changes` | yes | Change history, with the snapshot taken before each |
 | `sc2_revert_change` | no | Undo the most recent change |

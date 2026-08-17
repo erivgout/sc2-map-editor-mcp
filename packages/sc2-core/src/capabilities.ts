@@ -74,8 +74,9 @@ export const IMPLEMENTED: ServerCapabilities = Object.freeze({
   galaxy: { read: false, write: false, typecheck: false },
   // Phases 5, 11.
   triggers: { read: false, write: false },
-  // Phase 10.
-  localization: { read: false, write: false },
+  // Phase 10. Text tables are line-oriented and reference nothing, so they are the
+  // lowest-risk writable component in the document.
+  localization: { read: true, write: true },
   layout: { read: false, write: false },
   // Phase 15.
   objects: { read: false, write: false },

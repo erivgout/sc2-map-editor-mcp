@@ -100,23 +100,28 @@ describe('MCP server', () => {
 
     expect(names).toEqual([
       'sc2_clone_catalog_object',
+      'sc2_copy_text_key',
       'sc2_create_catalog_object',
       'sc2_create_snapshot',
       'sc2_delete_catalog_object',
+      'sc2_delete_text_key',
       'sc2_detect_installations',
       'sc2_diff_workspace',
       'sc2_discard_workspace',
       'sc2_find_catalog_references',
+      'sc2_find_missing_localization',
       'sc2_get_catalog_object',
       'sc2_get_changes',
       'sc2_get_dependencies',
       'sc2_get_document_info',
       'sc2_get_document_summary',
       'sc2_get_server_info',
+      'sc2_get_text_value',
       'sc2_list_catalog_domains',
       'sc2_list_component_types',
       'sc2_list_components',
       'sc2_list_files',
+      'sc2_list_locales',
       'sc2_list_snapshots',
       'sc2_list_workspaces',
       'sc2_open_document',
@@ -127,6 +132,8 @@ describe('MCP server', () => {
       'sc2_revert_change',
       'sc2_search_catalog',
       'sc2_search_files',
+      'sc2_search_text_keys',
+      'sc2_set_text_value',
     ]);
 
     for (const tool of tools) {
@@ -166,6 +173,7 @@ describe('MCP server', () => {
     // ...and nothing that depends on an unbuilt backend claims to.
     expect(capabilities['mpq']).toEqual({ read: false, write: false });
     expect(capabilities['terrain']).toEqual({ read: false, write: false });
+    expect(capabilities['localization']).toEqual({ read: true, write: true });
 
     expect(outcome.structured['limitations']).toEqual(expect.arrayContaining([expect.stringContaining('Packed')]));
   });
@@ -752,6 +760,108 @@ describe('MCP server', () => {
       'utf8',
     );
     expect(sourceContent).toBe(DOCUMENT_FIXTURE['Base.SC2Data/GameData/UnitData.xml']);
+  });
+
+  it('reads, edits, and adds localized strings while preserving the file byte-for-byte', async () => {
+    const opened = await callTool(harness.client, 'sc2_open_document', { source_path: harness.sourceDir });
+    const workspaceId = (opened.structured['workspace'] as Record<string, unknown>)['id'] as string;
+    const stagingPath = (opened.structured['workspace'] as Record<string, unknown>)['stagingPath'] as string;
+
+    const locales = await callTool(harness.client, 'sc2_list_locales', { workspace_id: workspaceId });
+    expect(locales.structured['locales']).toEqual(['enUS']);
+
+    const value = await callTool(harness.client, 'sc2_get_text_value', {
+      workspace_id: workspaceId,
+      key: 'Unit/Name/TestMarine',
+    });
+    expect(value.structured['value']).toBe('Test Marine');
+
+    const applied = await callTool(harness.client, 'sc2_set_text_value', {
+      workspace_id: workspaceId,
+      entries: [
+        { key: 'Unit/Name/TestMarine', value: 'Rail Marine' },
+        { key: 'Unit/Name/BrandNew', value: 'Brand New' },
+      ],
+      dry_run: false,
+    });
+    expect(applied.isError).toBe(false);
+
+    const tablePath = path.join(stagingPath, 'enUS.SC2Data', 'LocalizedData', 'GameStrings.txt');
+    const raw = await readFile(tablePath, 'utf8');
+    expect(raw).toContain('Unit/Name/TestMarine=Rail Marine');
+    expect(raw).toContain('Unit/Name/BrandNew=Brand New');
+    // CRLF endings survive the edit; a normalising writer would break the file's shape.
+    expect(raw).toContain('\r\n');
+  });
+
+  it('reports a missing key as not-found rather than an empty string', async () => {
+    const opened = await callTool(harness.client, 'sc2_open_document', { source_path: harness.sourceDir });
+    const workspaceId = (opened.structured['workspace'] as Record<string, unknown>)['id'] as string;
+
+    const outcome = await callTool(harness.client, 'sc2_get_text_value', {
+      workspace_id: workspaceId,
+      key: 'Unit/Name/Nope',
+    });
+
+    expect(outcome.isError).toBe(true);
+    expect((outcome.structured['error'] as Record<string, unknown>)['code']).toBe('SC2_NOT_FOUND');
+  });
+
+  it('copies a display name onto a cloned object', async () => {
+    const opened = await callTool(harness.client, 'sc2_open_document', { source_path: harness.sourceDir });
+    const workspaceId = (opened.structured['workspace'] as Record<string, unknown>)['id'] as string;
+
+    await callTool(harness.client, 'sc2_clone_catalog_object', {
+      workspace_id: workspaceId,
+      domain: 'Unit',
+      source_id: 'TestMarine',
+      new_id: 'RailMarine',
+      dry_run: false,
+    });
+
+    await callTool(harness.client, 'sc2_copy_text_key', {
+      workspace_id: workspaceId,
+      copies: [{ from_key: 'Unit/Name/TestMarine', to_key: 'Unit/Name/RailMarine' }],
+      dry_run: false,
+    });
+
+    const copied = await callTool(harness.client, 'sc2_get_text_value', {
+      workspace_id: workspaceId,
+      key: 'Unit/Name/RailMarine',
+    });
+    expect(copied.structured['value']).toBe('Test Marine');
+  });
+
+  it('finds catalog objects with no display name', async () => {
+    const opened = await callTool(harness.client, 'sc2_open_document', { source_path: harness.sourceDir });
+    const workspaceId = (opened.structured['workspace'] as Record<string, unknown>)['id'] as string;
+
+    const outcome = await callTool(harness.client, 'sc2_find_missing_localization', {
+      workspace_id: workspaceId,
+      domains: ['Unit'],
+    });
+
+    const missing = outcome.structured['missing'] as { id: string }[];
+    // TestMarine has a name in the fixture; the other two units do not.
+    expect(missing.map((entry) => entry.id).sort()).toEqual(['TestMarineBase', 'TestReaper']);
+    // The result has to say that an unnamed object is often correct, not a defect.
+    expect(String(outcome.structured['note'])).toContain('by design');
+  });
+
+  it('refuses a text value containing a newline', async () => {
+    const opened = await callTool(harness.client, 'sc2_open_document', { source_path: harness.sourceDir });
+    const workspaceId = (opened.structured['workspace'] as Record<string, unknown>)['id'] as string;
+
+    const outcome = await callTool(harness.client, 'sc2_set_text_value', {
+      workspace_id: workspaceId,
+      entries: [{ key: 'Unit/Name/Bad', value: 'line one\nline two' }],
+      dry_run: false,
+    });
+
+    expect(outcome.isError).toBe(true);
+    const error = outcome.structured['error'] as Record<string, unknown>;
+    expect(error['code']).toBe('SC2_INVALID_ARGUMENT');
+    expect(String(error['suggestedAction'])).toContain('<n/>');
   });
 
   it('lists workspaces so an id can be recovered after a reconnect', async () => {

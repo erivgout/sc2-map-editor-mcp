@@ -17,5 +17,6 @@ export * from './install/index.js';
 export * from './logging.js';
 export * from './paths.js';
 export * from './process/index.js';
+export * from './text/index.js';
 export * from './workspace/index.js';
 export * from './xml/index.js';

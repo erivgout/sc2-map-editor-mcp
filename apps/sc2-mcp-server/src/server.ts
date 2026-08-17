@@ -14,6 +14,7 @@ import { registerCatalogMutationTools } from './tools/catalogMutation.js';
 import { registerChangeTools } from './tools/changes.js';
 import { registerComponentTools } from './tools/components.js';
 import { registerEnvironmentTools } from './tools/environment.js';
+import { registerTextTools } from './tools/text.js';
 import { registerWorkspaceTools } from './tools/workspace.js';
 import { SERVER_NAME, SERVER_VERSION } from './version.js';
 
@@ -40,6 +41,7 @@ export function createMcpServer(context: ServerContext): McpServer {
   registerCatalogTools(server, context);
   registerCatalogMutationTools(server, context);
   registerChangeTools(server, context);
+  registerTextTools(server, context);
 
   return server;
 }
