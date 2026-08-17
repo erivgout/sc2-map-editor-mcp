@@ -18,7 +18,7 @@
 import { readFile } from 'node:fs/promises';
 
 import type { McpServer } from '@modelcontextprotocol/server';
-import { SC2Error, findGalaxyFiles, parseGalaxy, probeGalaxyToolkit, type ChangeResult } from '@sc2mcp/core';
+import { GENERATED_MAP_SCRIPT, SC2Error, findGalaxyFiles, parseGalaxy, probeGalaxyToolkit, type ChangeResult } from '@sc2mcp/core';
 import { z } from 'zod';
 
 import type { ServerContext } from '../context.js';
@@ -77,6 +77,32 @@ export function registerGalaxyTools(server: McpServer, context: ServerContext): 
       recoverable: false,
       suggestedAction: 'Run scripts/bootstrap.ps1 and build the vendored toolkit; see docs/galaxy.md.',
     });
+  }
+
+  /**
+   * MapScript.galaxy is regenerated from the trigger data, so anything written over it is
+   * lost the next time the editor saves — and the trigger logic it carried goes with it.
+   * Both write paths refuse it; they used to disagree, which left the file protected from
+   * patching but not from creation.
+   */
+  function refuseGeneratedScript(filePath: string): void {
+    if (filePath.toLowerCase() !== GENERATED_MAP_SCRIPT) return;
+    throw new SC2Error('SC2_UNSUPPORTED_OPERATION', 'MapScript.galaxy is generated from the trigger data and would be overwritten.', {
+      path: filePath,
+      recoverable: false,
+      suggestedAction: 'Edit an authored library under *.SC2Data, or change the triggers themselves.',
+    });
+  }
+
+  async function galaxyFileExists(workspaceId: string, filePath: string): Promise<boolean> {
+    const absolutePath = await workspaces.resolveWorkingPath(workspaceId, filePath);
+    try {
+      await readFile(absolutePath, 'utf8');
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+      throw error;
+    }
   }
 
   async function readGalaxy(workspaceId: string, filePath: string): Promise<string> {
@@ -314,13 +340,7 @@ export function registerGalaxyTools(server: McpServer, context: ServerContext): 
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
     toolHandler({ name: 'sc2_apply_galaxy_patch', logger }, async (args) => {
-      if (args.path.toLowerCase() === 'mapscript.galaxy') {
-        throw new SC2Error('SC2_UNSUPPORTED_OPERATION', 'MapScript.galaxy is generated from the trigger data and would be overwritten.', {
-          path: args.path,
-          recoverable: false,
-          suggestedAction: 'Edit an authored library under *.SC2Data, or change the triggers themselves.',
-        });
-      }
+      refuseGeneratedScript(args.path);
 
       const source = await readGalaxy(args.workspace_id, args.path);
 
@@ -436,7 +456,7 @@ export function registerGalaxyTools(server: McpServer, context: ServerContext): 
     {
       title: 'Create a Galaxy script',
       description:
-        'Adds a new Galaxy library to the document. The content is syntax-checked before it is written unless force=true. Note that creating the file does not make the map use it — something has to include it, and this server cannot wire that up for you.',
+        'Adds a new Galaxy library to the document. Refuses to replace an existing file unless overwrite=true, and never writes the generated MapScript.galaxy. The content is syntax-checked before it is written unless force=true. Note that creating the file does not make the map use it — something has to include it, and this server cannot wire that up for you.',
       inputSchema: z.object({
         workspace_id: WorkspaceIdSchema,
         expected_revision: z.number().int().nonnegative().optional(),
@@ -444,13 +464,24 @@ export function registerGalaxyTools(server: McpServer, context: ServerContext): 
         path: z.string().min(1).describe('e.g. "Base.SC2Data/LibMine.galaxy".'),
         content: z.string(),
         force: z.boolean().optional().describe('Create even if the content has syntax errors.'),
+        overwrite: z.boolean().optional().describe('Replace the file if it already exists. Defaults to false.'),
       }),
       outputSchema: ChangeResultSchema,
-      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
     },
     toolHandler({ name: 'sc2_create_galaxy_file', logger }, async (args) => {
       if (!args.path.toLowerCase().endsWith('.galaxy')) {
         throw new SC2Error('SC2_INVALID_ARGUMENT', 'A Galaxy file must end in .galaxy.', { path: args.path, recoverable: true });
+      }
+      refuseGeneratedScript(args.path);
+
+      if (args.overwrite !== true && (await galaxyFileExists(args.workspace_id, args.path))) {
+        throw new SC2Error('SC2_CONFLICT', `${args.path} already exists.`, {
+          workspaceId: args.workspace_id,
+          path: args.path,
+          recoverable: true,
+          suggestedAction: 'Use sc2_apply_galaxy_patch to edit it, or pass overwrite=true to replace it wholesale.',
+        });
       }
 
       const diagnostics: { severity: 'error' | 'warning'; code: string; message: string; path?: string }[] = [];

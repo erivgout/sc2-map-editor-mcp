@@ -4,7 +4,9 @@ import { defineConfig, globalIgnores } from 'eslint/config';
 import tseslint from 'typescript-eslint';
 
 export default defineConfig([
-  globalIgnores(['**/dist/**', '**/node_modules/**', 'vendor/**', 'native/**', 'fixtures/generated/**', 'coverage/**']),
+  // `scratch/` is an untracked bench for driving the server by hand; it is not shipped
+  // code and is deliberately outside the TypeScript projects.
+  globalIgnores(['**/dist/**', '**/node_modules/**', 'vendor/**', 'native/**', 'fixtures/generated/**', 'coverage/**', 'scratch/**']),
   js.configs.recommended,
   tseslint.configs.strictTypeChecked,
   tseslint.configs.stylisticTypeChecked,

@@ -334,3 +334,30 @@ export class XmlEditor {
     return index;
   }
 }
+
+/**
+ * Rewrites `<X a="1"/>` as `<X a="1">` + newline + `</X>` so children can be appended.
+ *
+ * {@link XmlEditor.appendChild} deliberately refuses a self-closing parent, because turning
+ * one form into the other is a structural rewrite rather than a field edit. This makes that
+ * rewrite explicit and separate: a caller that genuinely needs to add a first child does it
+ * here, in its own edit, and then works against the reparsed result.
+ *
+ * Returns the source unchanged when the element already has an open/close form.
+ */
+export function expandSelfClosingElement(source: string, element: XmlElement): string {
+  if (!element.selfClosing) return source;
+
+  const marker = source.lastIndexOf('/>', element.span.end);
+  if (marker === -1 || marker < element.span.start) {
+    throw new SC2Error('SC2_INTERNAL_ERROR', `Could not locate the "/>" of <${element.name}>.`, { recoverable: false });
+  }
+
+  const newline = detectNewline(source);
+  const indent = indentationBefore(source, element.span.start);
+  // Drop the whitespace that separated the last attribute from the marker, so `<X />`
+  // closes as `<X>` rather than `<X >`.
+  const head = source.slice(0, marker).replace(/[ \t]+$/, '');
+
+  return `${head}>${newline}${indent}</${element.name}>${source.slice(element.span.end)}`;
+}

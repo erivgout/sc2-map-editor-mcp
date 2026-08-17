@@ -19,8 +19,10 @@ import path from 'node:path';
 import { parseComponentList, parseDocumentInfo, COMPONENT_LIST_FILENAME, DOCUMENT_INFO_FILENAME } from '../components/index.js';
 import { SC2Error } from '../errors.js';
 import type { WalkedFile } from '../fs/index.js';
+import { GENERATED_MAP_SCRIPT, parseGalaxy, probeGalaxyToolkit } from '../galaxy/index.js';
 import { CatalogIndex } from '../gamedata/index.js';
 import { parseTextTable, findTextTables } from '../text/index.js';
+import { TRIGGERS_FILENAME, parseTriggerData } from '../triggers/index.js';
 import { parseXml } from '../xml/parse.js';
 
 export type CheckStatus = 'passed' | 'failed' | 'unsupported' | 'skipped';
@@ -141,41 +143,35 @@ export async function validateDocument(input: ValidateInput): Promise<Validation
     readFile(path.join(input.workingPath, ...relativePath.split('/')), 'utf8');
 
   // ---------------------------------------------------------------- archive
-  if (input.sourceKind === 'mpq') {
-    // Verifying a packed archive means reopening it through the MPQ helper, which this
-    // build does not have. Saying "passed" would be a claim we cannot support.
-    checks.archive = {
-      status: 'unsupported',
-      reason: 'Archive verification needs the sc2mpq helper, which is not available in this build.',
-      errorCount: 0,
-      warningCount: 0,
-    };
-  } else {
-    if (input.files.length === 0) {
+  // These checks are about the staged tree, which is a directory whatever the document was
+  // opened from, so they apply to both source kinds. They used to be skipped for `mpq`,
+  // which had it backwards: a case collision only becomes fatal once the tree is packed.
+  // Verifying the packed bytes is a separate matter and happens at commit, by reopening
+  // the archive and reading every member.
+  if (input.files.length === 0) {
+    collector.add({
+      category: 'archive',
+      severity: 'error',
+      code: 'SC2_VALIDATION_FAILED',
+      message: 'The staged document contains no files.',
+    });
+  }
+
+  // Duplicate paths differing only in case are legal on disk but collide inside an MPQ.
+  const seen = new Map<string, string>();
+  for (const file of input.files) {
+    const key = file.relativePath.toLowerCase();
+    const previous = seen.get(key);
+    if (previous !== undefined) {
       collector.add({
         category: 'archive',
         severity: 'error',
         code: 'SC2_VALIDATION_FAILED',
-        message: 'The staged document contains no files.',
+        message: `Two files differ only in case and would collide when packed: "${previous}" and "${file.relativePath}".`,
+        path: file.relativePath,
       });
     }
-
-    // Duplicate paths differing only in case are legal on disk but collide inside an MPQ.
-    const seen = new Map<string, string>();
-    for (const file of input.files) {
-      const key = file.relativePath.toLowerCase();
-      const previous = seen.get(key);
-      if (previous !== undefined) {
-        collector.add({
-          category: 'archive',
-          severity: 'error',
-          code: 'SC2_VALIDATION_FAILED',
-          message: `Two files differ only in case and would collide when packed: "${previous}" and "${file.relativePath}".`,
-          path: file.relativePath,
-        });
-      }
-      seen.set(key, file.relativePath);
-    }
+    seen.set(key, file.relativePath);
   }
 
   // ------------------------------------------------------------- components
@@ -384,19 +380,92 @@ export async function validateDocument(input: ValidateInput): Promise<Validation
     }
   }
 
+  // ----------------------------------------------------------------- galaxy
+  // Syntax only, and the report says so: without the game's native declarations a type
+  // check would report every built-in call as an unresolved symbol.
+  const authoredGalaxy = input.files.filter(
+    (file) =>
+      file.relativePath.toLowerCase().endsWith('.galaxy') &&
+      file.relativePath.toLowerCase() !== GENERATED_MAP_SCRIPT,
+  );
+  const toolkit = await probeGalaxyToolkit();
+
+  if (!toolkit.available) {
+    checks.galaxy = {
+      status: 'unsupported',
+      reason: `Galaxy scripts were not checked: ${toolkit.reason ?? 'the Galaxy toolkit is not built'}.`,
+      errorCount: 0,
+      warningCount: 0,
+    };
+  } else if (authoredGalaxy.length === 0) {
+    checks.galaxy = {
+      status: 'skipped',
+      reason: 'This document has no authored Galaxy scripts. MapScript.galaxy is generated and is not checked.',
+      errorCount: 0,
+      warningCount: 0,
+    };
+  } else {
+    for (const file of authoredGalaxy) {
+      let parsed;
+      try {
+        parsed = await parseGalaxy(file.relativePath, await read(file.relativePath));
+      } catch (error) {
+        collector.add({
+          category: 'galaxy',
+          severity: 'error',
+          code: 'SC2_PARSE_ERROR',
+          message: `Could not parse ${file.relativePath}: ${error instanceof Error ? error.message : String(error)}`,
+          path: file.relativePath,
+        });
+        continue;
+      }
+      for (const diagnostic of parsed.diagnostics) {
+        if (diagnostic.severity === 'info') continue;
+        collector.add({
+          category: 'galaxy',
+          severity: diagnostic.severity === 'error' ? 'error' : 'warning',
+          code: 'SC2_VALIDATION_FAILED',
+          message: `${diagnostic.line}:${diagnostic.column} ${diagnostic.message}`,
+          path: file.relativePath,
+        });
+      }
+    }
+  }
+
+  // --------------------------------------------------------------- triggers
+  // Structure only: this reads the trigger graph, it does not evaluate what the triggers do.
+  const triggerFile = byPath.get(TRIGGERS_FILENAME.toLowerCase());
+  if (triggerFile === undefined) {
+    checks.triggers = {
+      status: 'skipped',
+      reason: `This document has no ${TRIGGERS_FILENAME} component.`,
+      errorCount: 0,
+      warningCount: 0,
+    };
+  } else {
+    try {
+      const data = parseTriggerData(await read(triggerFile.relativePath));
+      if (data.elements.size === 0) {
+        collector.add({
+          category: 'triggers',
+          severity: 'warning',
+          code: 'SC2_VALIDATION_FAILED',
+          message: 'The Triggers component parsed but declares no elements.',
+          path: triggerFile.relativePath,
+        });
+      }
+    } catch (error) {
+      collector.add({
+        category: 'triggers',
+        severity: 'error',
+        code: 'SC2_PARSE_ERROR',
+        message: `Could not parse the Triggers component: ${error instanceof Error ? error.message : String(error)}`,
+        path: triggerFile.relativePath,
+      });
+    }
+  }
+
   // -------------------------------------------- categories this build cannot check
-  checks.galaxy = {
-    status: 'unsupported',
-    reason: 'Galaxy parsing is not implemented in this build; scripts were not checked at all.',
-    errorCount: 0,
-    warningCount: 0,
-  };
-  checks.triggers = {
-    status: 'unsupported',
-    reason: 'Trigger parsing is not implemented in this build; triggers were not checked at all.',
-    errorCount: 0,
-    warningCount: 0,
-  };
   checks.terrain = {
     status: 'unsupported',
     reason: 'Terrain codecs are not implemented in this build; terrain was not checked at all.',

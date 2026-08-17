@@ -908,10 +908,22 @@ describe('MCP server', () => {
     expect(checks['xml']?.status).toBe('passed');
 
     // The point of the category model: unchecked is not the same as clean, and the report
-    // has to say so where a reader will see it.
-    expect(report.structured['notChecked']).toEqual(expect.arrayContaining(['galaxy', 'triggers', 'terrain']));
-    expect(checks['galaxy']?.reason).toContain('not checked at all');
+    // has to say so where a reader will see it. Terrain is the one that genuinely has no
+    // codec; galaxy and triggers report what they actually did, which depends on the
+    // machine rather than being hardcoded.
+    expect(report.structured['notChecked']).toEqual(expect.arrayContaining(['terrain']));
+    expect(checks['terrain']?.reason).toContain('not checked at all');
     expect(report.text).toContain('NOT CHECKED AT ALL');
+
+    // A category may only claim "passed" when it really ran, so anything that is not
+    // passed has to explain itself.
+    for (const category of ['galaxy', 'triggers'] as const) {
+      const check = checks[category];
+      expect(check, category).toBeDefined();
+      if (check!.status !== 'passed' && check!.status !== 'failed') {
+        expect(check!.reason, category).toBeTruthy();
+      }
+    }
   });
 
   it('reports malformed XML as a validation error', async () => {

@@ -18,7 +18,7 @@ answer for a running build. As of now:
 | Workspace staging | ✅ | ✅ | Unpacked document directories only |
 | Component inventory | ✅ | ❌ | `ComponentList`, `DocumentInfo`, dependencies — verified against real editor output |
 | GameData catalogs | ✅ | ✅ | Search, inspect, resolve inheritance, find references, patch/clone/create/delete. Own document only — dependencies are not loaded |
-| MPQ archives (`.SC2Map`, `.SC2Mod`) | ✅ | ⚠️ | Byte-identical round trips on real ladder maps; **not yet opened in the editor** — see [docs/native-helper.md](docs/native-helper.md) |
+| MPQ archives (`.SC2Map`, `.SC2Mod`) | ✅ | ✅ | Byte-identical round trips on real ladder maps, and maps packed here open in the editor — see [docs/native-helper.md](docs/native-helper.md) |
 | Galaxy scripts | ✅ | ✅ | Parse, symbols, syntax diagnostics, safe text patching. **No type checking** — needs the game's natives. Requires the vendored toolkit to be built |
 | Triggers | ✅ | ⚠️ | Structure, names, search. Renaming only — structural editing deliberately not implemented |
 | Localization | ✅ | ✅ | Text tables, preserving BOM and CRLF exactly |
@@ -30,10 +30,11 @@ answer for a running build. As of now:
 Why the gaps are where they are, and what "⚠️" means in each row:
 [docs/capabilities.md](docs/capabilities.md).
 
-⚠️ Packed archives work, but no repacked map has been opened in the Galaxy Editor yet -
-the one validation step that cannot be automated. Every packed commit says so. Building the
-helper needs a C++ toolchain and the Windows SDK (`scripts/build-native.ps1`); without it
-`capabilities.mpq` reports `false` and packed archives are refused with a clear error.
+Packed archives work end to end: a map authored through this server, packed here, and
+opened in the Galaxy Editor loads as a real document, with the editor resolving the
+authored catalogs by name. Building the helper needs a C++ toolchain and the Windows SDK
+(`scripts/build-native.ps1`); without it `capabilities.mpq` reports `false` and packed
+archives are refused with a clear error.
 
 **Dependencies: local ones load, Blizzard's do not.** A `.SC2Mod` directory beside your map
 is indexed, and its objects become visible for inheritance and references - read-only, since

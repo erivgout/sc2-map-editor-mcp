@@ -29,6 +29,35 @@ import { ok, toolHandler } from '../mcp-errors.js';
 
 const WorkspaceIdSchema = z.string().min(1).describe('Workspace id returned by sc2_open_document.');
 
+/** What a brand-new catalog file contains, in the editor's own encoding and line endings. */
+const EMPTY_CATALOG = '<?xml version="1.0" encoding="utf-8"?>\r\n<Catalog>\r\n</Catalog>\r\n';
+
+/**
+ * Reads the catalog file an object is being added to, creating it when the document does
+ * not have one yet.
+ *
+ * A missing file used to surface as an unhandled ENOENT wrapped in SC2_INTERNAL_ERROR,
+ * which read as a server bug rather than "this document has no UpgradeData.xml". Creating
+ * it is only offered inside a GameData directory, because that is where the game looks;
+ * anywhere else the file would be written and then silently ignored.
+ */
+async function readCatalogFileForCreation(absolutePath: string, relativePath: string): Promise<string> {
+  try {
+    return await readFile(absolutePath, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+
+    if (!/(^|\/)GameData\/[^/]+\.xml$/i.test(relativePath)) {
+      throw new SC2Error('SC2_NOT_FOUND', `No catalog file at ${relativePath}, and it is not a place the game would load one from.`, {
+        path: relativePath,
+        recoverable: true,
+        suggestedAction: 'Catalog files live in a GameData directory, e.g. "Base.SC2Data/GameData/UpgradeData.xml".',
+      });
+    }
+    return EMPTY_CATALOG;
+  }
+}
+
 const MutationArgsShape = {
   workspace_id: WorkspaceIdSchema,
   expected_revision: z
@@ -318,11 +347,12 @@ export function registerCatalogMutationTools(server: McpServer, context: ServerC
       }
 
       const absolutePath = await workspaces.resolveWorkingPath(args.workspace_id, targetPath);
-      const content = await readFile(absolutePath, 'utf8');
+      const content = await readCatalogFileForCreation(absolutePath, targetPath);
+      const createdFile = content === EMPTY_CATALOG;
       const outcome = createCatalogEntry(content, args.ctype, args.id, targetPath, { parent: args.parent });
 
-      const diagnostics =
-        args.parent !== undefined && index.get(domain, args.parent) === null
+      const diagnostics = [
+        ...(args.parent !== undefined && index.get(domain, args.parent) === null
           ? [
               {
                 severity: 'warning' as const,
@@ -330,7 +360,18 @@ export function registerCatalogMutationTools(server: McpServer, context: ServerC
                 message: `Parent ${catalogKey(domain, args.parent)} is not in this document. That is fine if it lives in a dependency, but nothing here can verify it.`,
               },
             ]
-          : [];
+          : []),
+        ...(createdFile
+          ? [
+              {
+                severity: 'warning' as const,
+                code: 'SC2_UNSUPPORTED_OPERATION',
+                message: `${targetPath} did not exist and was created as an empty catalog.`,
+                path: targetPath,
+              },
+            ]
+          : []),
+      ];
 
       const result = await workspaces.transactions.run({
         workspaceId: args.workspace_id,

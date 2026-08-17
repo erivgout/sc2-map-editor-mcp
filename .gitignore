@@ -18,6 +18,9 @@ vendor/*/
 
 # Local user config -- never commit machine-specific paths
 sc2-mcp.config.json
+
+# Ad-hoc bench for driving the server by hand
+scratch/
 sc2-mcp.config.local.json
 .env
 .env.local

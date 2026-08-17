@@ -62,7 +62,7 @@ configuration. Point `mpqHelperPath` at it if you build elsewhere.
 | Round-trip against generated fixtures | passing (`tests/mpq.integration.test.ts`) |
 | Round-trip against real ladder maps | **passing** - see below |
 | Full open -> edit -> commit -> reopen on a real packed map | passing (`tests/packed-map.integration.test.ts`) |
-| Repacked map opened in the Galaxy Editor | **not done - manual step** |
+| Repacked map opened in the Galaxy Editor | **done** - loads, and the editor reads the authored catalogs |
 
 ### Round-trip evidence
 
@@ -81,14 +81,20 @@ PASS Goldenaura512AIE.SC2Map  files=100 verify=true sameList=true mismatched=0
 
 Every member of every map came back byte-identical.
 
-### The one step that has not been done
+### Opened in the editor
 
-**No repacked map has been opened in the Galaxy Editor.** That is PLAN.md section 10's last
-validation step and it cannot be automated. `capabilities.mpq.write` is nevertheless
-`true`, because advertising "cannot write" while shipping a tested writer would be its own
-kind of dishonesty - instead, every packed commit emits a warning naming exactly this gap.
+PLAN.md section 10's last validation step is done. A map was authored end to end through
+this server - 119 new catalog objects, 178 localized strings, an authored Galaxy library -
+committed as a packed `.SC2Map`, and opened in the Galaxy Editor.
 
-Open one committed archive in the editor once, and the gap closes.
+The editor loaded it and wrote `XMLAlerts.txt` naming the authored objects and fields it
+objected to, by id. Those were real data errors (`DamageDealtScaled` is indexed by damage
+kind; `SModification` has no `VitalMaxMultiplier`), they were fixed through the catalog
+tools, and the repacked map then opened with no alerts.
+
+That is stronger evidence than "the archive reopens": the editor parsed the catalogs this
+build wrote and resolved them as a document. `capabilities.mpq.write` is `true` on that
+basis rather than on the round-trip alone.
 
 ## CLI contract
 

@@ -157,10 +157,80 @@ describe('applyCatalogPatches', () => {
     expect(outcome.content).toContain('<CUnit id="Reaper" parent="Marine">');
   });
 
-  it('refuses a path whose intermediate segment does not exist', () => {
-    expect(() =>
-      applyCatalogPatches(CATALOG, 'Unit', 'Marine', [{ op: 'set', path: 'Missing[0].Inner', value: 'x' }], PATH),
-    ).toThrow(SC2Error);
+  it('creates missing intermediate containers on the way to a nested field', () => {
+    const outcome = applyCatalogPatches(
+      CATALOG,
+      'Unit',
+      'Marine',
+      [{ op: 'set', path: 'Cost.Charge.TimeUse', value: '24' }],
+      PATH,
+    );
+
+    expect(outcome.content).toContain('<Cost>');
+    expect(outcome.content).toContain('<Charge>');
+    expect(outcome.content).toContain('<TimeUse value="24"/>');
+    // The containers are reported, so the change log explains the whole structure it built.
+    expect(outcome.summary).toEqual([
+      'created Unit/Marine.Cost',
+      'created Unit/Marine.Cost.Charge',
+      'created Unit/Marine.Cost.Charge.TimeUse = 24',
+    ]);
+    expect(parseCatalogFile(outcome.content, PATH).entries).toHaveLength(2);
+  });
+
+  it('creates an indexed intermediate container', () => {
+    const outcome = applyCatalogPatches(
+      CATALOG,
+      'Unit',
+      'Marine',
+      [{ op: 'set', path: 'AreaArray[0].Radius', value: '4' }],
+      PATH,
+    );
+
+    expect(outcome.content).toContain('<AreaArray index="0">');
+    expect(outcome.content).toContain('<Radius value="4"/>');
+  });
+
+  it('patches an object that was created self-closing', () => {
+    // sc2_create_catalog_object emits `<CUnit id="X" parent="Y"/>`; the documented
+    // workflow is to create then patch, so the first patch has to open it up.
+    const created = createCatalogEntry(CATALOG, 'CUnit', 'Firebat', PATH, { parent: 'Marine' });
+    expect(created.content).toContain('<CUnit id="Firebat" parent="Marine"/>');
+
+    const outcome = applyCatalogPatches(
+      created.content,
+      'Unit',
+      'Firebat',
+      [
+        { op: 'set', path: 'LifeMax', value: '260' },
+        { op: 'append_array', path: 'WeaponArray', link: 'FlameThrower' },
+      ],
+      PATH,
+    );
+
+    expect(outcome.content).toContain('<CUnit id="Firebat" parent="Marine">');
+    expect(outcome.content).toContain('<LifeMax value="260"/>');
+    expect(outcome.content).toContain('<WeaponArray index="0" Link="FlameThrower"/>');
+    expect(outcome.content).toContain('</CUnit>');
+
+    const entries = parseCatalogFile(outcome.content, PATH).entries;
+    expect(entries).toHaveLength(3);
+    expect(entries.find((entry) => entry.id === 'Firebat')?.parent).toBe('Marine');
+  });
+
+  it('leaves an unrelated self-closing sibling alone when expanding one', () => {
+    const withTwo = createCatalogEntry(
+      createCatalogEntry(CATALOG, 'CUnit', 'Firebat', PATH, { parent: 'Marine' }).content,
+      'CUnit',
+      'Medic',
+      PATH,
+      { parent: 'Marine' },
+    ).content;
+
+    const outcome = applyCatalogPatches(withTwo, 'Unit', 'Firebat', [{ op: 'set', path: 'LifeMax', value: '9' }], PATH);
+
+    expect(outcome.content).toContain('<CUnit id="Medic" parent="Marine"/>');
+    expect(outcome.content).toContain('<CUnit id="Firebat" parent="Marine">');
   });
 
   it('refuses to patch an object the file does not declare', () => {

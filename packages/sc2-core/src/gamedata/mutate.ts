@@ -10,10 +10,10 @@
  */
 
 import { SC2Error } from '../errors.js';
-import { XmlEditor } from '../xml/edit.js';
+import { XmlEditor, expandSelfClosingElement } from '../xml/edit.js';
 import { attributeValue, childElements, escapeAttribute, parseXml, type XmlElement } from '../xml/parse.js';
 import { domainFromElementName } from './domains.js';
-import { formatFieldPath, lookupField, nextArrayIndex, parseFieldPath } from './fieldPath.js';
+import { formatFieldPath, lookupField, nextArrayIndex, parseFieldPath, type FieldPathSegment } from './fieldPath.js';
 
 /**
  * A single patch operation.
@@ -92,6 +92,23 @@ export function applyCatalogPatches(
   patches: readonly CatalogPatch[],
   sourcePath: string,
 ): PatchOutcome {
+  const summary: string[] = [];
+  const noOps: string[] = [];
+
+  // Each patch is applied against a freshly parsed copy of the previous result. Structural
+  // work — expanding `<X/>` into `<X>…</X>`, materialising a missing container — changes the
+  // spans every later edit is addressed by, so batching them into one buffer would either
+  // collide or write to stale offsets.
+  let current = source;
+  for (const patch of patches) {
+    current = applyOnePatch(current, domain, id, patch, sourcePath, summary, noOps);
+  }
+
+  return { content: current, summary, noOps };
+}
+
+/** Finds the entry being patched, or explains which part of the address failed. */
+function locateEntry(source: string, domain: string, id: string, sourcePath: string): XmlElement {
   const document = parseXml(source, { path: sourcePath });
   if (document.root === null) {
     throw new SC2Error('SC2_PARSE_ERROR', `${sourcePath} has no root element.`, { path: sourcePath, recoverable: false });
@@ -105,30 +122,101 @@ export function applyCatalogPatches(
       recoverable: true,
     });
   }
+  return entryElement;
+}
 
-  const editor = new XmlEditor(source);
-  const summary: string[] = [];
-  const noOps: string[] = [];
+/**
+ * Guarantees the element that will hold `segments`' final field exists and can take
+ * children, creating missing containers and expanding self-closing ones as needed.
+ *
+ * This is what makes the create-then-patch workflow work: a freshly created
+ * `<CUnit id="X" parent="Y"/>` has no content, and every field added to it afterwards
+ * needs the open/close form first.
+ */
+function ensureHolder(
+  source: string,
+  domain: string,
+  id: string,
+  segments: readonly FieldPathSegment[],
+  sourcePath: string,
+  summary: string[],
+): string {
+  const holderSegments = segments.slice(0, -1);
 
-  for (const patch of patches) {
-    const segments = parseFieldPath(patch.path);
-    const lookup = lookupField(entryElement, segments);
+  for (;;) {
+    const entry = locateEntry(source, domain, id, sourcePath);
+    const lookup = lookupField(entry, holderSegments);
+    const holder = holderSegments.length === 0 ? entry : lookup.element;
 
-    // A path is only createable if everything except the final segment resolved.
-    const missingIntermediate = lookup.element === null && lookup.resolvedSegments.length < segments.length - 1;
-    if (missingIntermediate) {
-      throw new SC2Error(
-        'SC2_NOT_FOUND',
-        `${domain}/${id} has no field "${formatFieldPath(segments.slice(0, lookup.resolvedSegments.length + 1))}", so "${patch.path}" cannot be reached.`,
-        {
-          objectId: `${domain}/${id}`,
-          recoverable: true,
-          suggestedAction: 'Create the intermediate field first, or check the path with sc2_get_catalog_object.',
-        },
-      );
+    if (holder !== null) {
+      if (!holder.selfClosing) return source;
+      source = expandSelfClosingElement(source, holder);
+      continue;
     }
 
-    switch (patch.op) {
+    // A container along the way is missing. Create the shallowest one and go round again;
+    // the next pass either finds it or expands it.
+    if (lookup.parent.selfClosing) {
+      source = expandSelfClosingElement(source, lookup.parent);
+      continue;
+    }
+
+    const resolved = lookup.resolvedSegments.length;
+    const missing = holderSegments[resolved];
+    if (missing === undefined) {
+      throw new SC2Error('SC2_INTERNAL_ERROR', `Could not resolve a holder for a patch on ${domain}/${id}.`, {
+        objectId: `${domain}/${id}`,
+        recoverable: false,
+      });
+    }
+
+    const editor = new XmlEditor(source);
+    editor.appendChild(
+      lookup.parent,
+      renderField(missing.name, { index: missing.index ?? undefined }),
+      `create ${missing.name}`,
+    );
+    summary.push(`created ${domain}/${id}.${formatFieldPath(holderSegments.slice(0, resolved + 1))}`);
+    source = editor.apply();
+  }
+}
+
+/** Applies one patch to a parsed copy of `source` and returns the new contents. */
+function applyOnePatch(
+  source: string,
+  domain: string,
+  id: string,
+  patch: CatalogPatch,
+  sourcePath: string,
+  summary: string[],
+  noOps: string[],
+): string {
+  const segments = parseFieldPath(patch.path);
+  if (segments.length === 0) {
+    throw new SC2Error('SC2_INVALID_ARGUMENT', `Empty field path in a patch for ${domain}/${id}.`, { recoverable: true });
+  }
+
+  // Removing never adds structure, so it is resolved against the source as it stands.
+  if (patch.op === 'remove') {
+    const entry = locateEntry(source, domain, id, sourcePath);
+    const found = lookupField(entry, segments).element;
+    if (found === null) {
+      noOps.push(`${domain}/${id}.${patch.path} does not exist; nothing to remove`);
+      return source;
+    }
+    const editor = new XmlEditor(source);
+    editor.removeElement(found, `remove ${patch.path}`);
+    summary.push(`removed ${domain}/${id}.${patch.path}`);
+    return editor.apply();
+  }
+
+  source = ensureHolder(source, domain, id, segments, sourcePath, summary);
+
+  const entryElement = locateEntry(source, domain, id, sourcePath);
+  const lookup = lookupField(entryElement, segments);
+  const editor = new XmlEditor(source);
+
+  switch (patch.op) {
       case 'set':
       case 'set_link':
       case 'set_attribute': {
@@ -171,16 +259,6 @@ export function applyCatalogPatches(
         break;
       }
 
-      case 'remove': {
-        if (lookup.element === null) {
-          noOps.push(`${domain}/${id}.${patch.path} does not exist; nothing to remove`);
-          break;
-        }
-        editor.removeElement(lookup.element, `remove ${patch.path}`);
-        summary.push(`removed ${domain}/${id}.${patch.path}`);
-        break;
-      }
-
       case 'append_array': {
         if (patch.value === undefined && patch.link === undefined) {
           throw new SC2Error('SC2_INVALID_ARGUMENT', 'append_array needs a value or a link.', { recoverable: true });
@@ -219,10 +297,9 @@ export function applyCatalogPatches(
         summary.push(`appended ${domain}/${id}.${last.name}[${index}] = ${patch.link ?? patch.value ?? ''}`);
         break;
       }
-    }
   }
 
-  return { content: editor.isEmpty ? source : editor.apply(), summary, noOps };
+  return editor.isEmpty ? source : editor.apply();
 }
 
 export interface CloneOutcome {

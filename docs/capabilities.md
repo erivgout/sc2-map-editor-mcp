@@ -27,7 +27,7 @@ the sidecar binary is not there.
 | Placed objects (`Objects`) | ✅ | ❌ | XML, not binary. |
 | Regions | ✅ | ❌ | XML, not binary. |
 | Terrain | ⚠️ | ❌ | Descriptor only; bulk data reported by header, never decoded. |
-| MPQ archives | ✅ | ⚠️ | Byte-identical round trips on real ladder maps; not yet opened in the editor. |
+| MPQ archives | ✅ | ✅ | Byte-identical round trips on real ladder maps; repacked maps open in the editor. |
 | Local dependency archives | ✅ | ❌ | Unpacked `.SC2Mod` directories are indexed; contents are read-only. |
 | Stock (CASC) dependencies | ❌ | ❌ | Need a CASC reader; reported as `in-casc`, not missing. |
 | `Attributes`, `CustomAI` | ❌ | ❌ | XML, but not modelled. |
@@ -36,11 +36,15 @@ the sidecar binary is not there.
 
 ## Why each gap exists
 
-**MPQ archives - one manual step outstanding.** The `sc2mpq` sidecar is built and working.
-Six real ladder maps extract, repack, verify, and re-extract byte-identically, and the full
-open -> edit -> commit -> reopen cycle passes on a real packed map. What has *not* happened
-is opening a repacked map in the Galaxy Editor - PLAN.md section 10's last validation step,
-which cannot be automated. Every packed commit emits a warning saying so.
+**MPQ archives - complete.** The `sc2mpq` sidecar is built and working. Six real ladder maps
+extract, repack, verify, and re-extract byte-identically, and the full
+open -> edit -> commit -> reopen cycle passes on a real packed map.
+
+PLAN.md section 10's last validation step - opening a repacked map in the Galaxy Editor -
+has now been done. A map was authored through this server, packed, and opened in the editor,
+which loaded it and reported catalog errors against the authored objects by name; after
+those were fixed the same map reopened with no alerts at all. That is the editor reading
+this build's output as a real document, which is the evidence the gate was waiting for.
 See [native-helper.md](native-helper.md).
 
 **Galaxy type checking.** The vendored `sc2-galaxy-lang` ships a `TypeChecker`, and it is
@@ -89,9 +93,22 @@ have. `sc2_get_dependencies` reports them as `in-casc` rather than `not-found`, 
 - `skipped` — checkable, but not applicable to this document
 - `unsupported` — **not examined at all**
 
-The distinction between `passed` and `unsupported` is the point. `galaxy`, `triggers`, and
-`terrain` are `unsupported` today, and the report restates that set separately so a clean
-result cannot be mistaken for a clean bill of health.
+The distinction between `passed` and `unsupported` is the point, and the report restates
+the unsupported set separately so a clean result cannot be mistaken for a clean bill of
+health.
+
+Which categories are `unsupported` depends on the machine, not on a constant. `galaxy`
+runs whenever the vendored toolkit is built, and checks authored scripts for syntax errors
+— never types, and never the generated `MapScript.galaxy`. `triggers` parses the trigger
+graph to confirm it reads, which is not the same as judging what the triggers do. `archive`
+checks the staged tree for the things that only become fatal once it is packed, such as two
+paths differing solely in case; the packed bytes themselves are verified at commit, by
+reopening the archive and reading every member. `terrain` is the one category that is
+genuinely unsupported everywhere, because no codec for the bulk data exists.
+
+These used to be hardcoded to `unsupported` with reasons that had stopped being true — the
+report claimed the MPQ helper and the Galaxy parser were absent on builds that had both.
+A category may only say `passed` when it actually ran.
 
 ## Keeping this honest
 
