@@ -59,7 +59,18 @@ export interface PlacedObjectsDocument {
   readonly countsByKind: ReadonlyMap<string, number>;
 }
 
-const NAMED_OBJECT_ATTRIBUTES = new Set(['Id', 'Type', 'Position', 'Rotation', 'Scale', 'Variation']);
+const NAMED_OBJECT_ATTRIBUTES = new Set(['Id', 'Type', 'UnitType', 'Position', 'Rotation', 'Scale', 'Variation']);
+
+/**
+ * Which attribute names an object's type, which depends on its kind.
+ *
+ * `<ObjectUnit>` uses `UnitType`; points and doodads use `Type`. Verified against 181 real
+ * `ObjectUnit` entries in editor output — reading only `Type` reported every placed unit
+ * in a real map as untyped.
+ */
+export function typeAttributeFor(kind: string): 'UnitType' | 'Type' {
+  return kind === 'ObjectUnit' ? 'UnitType' : 'Type';
+}
 
 export function parsePlacedObjects(source: string): PlacedObjectsDocument {
   const document = parseXml(source, { path: OBJECTS_FILENAME });
@@ -90,7 +101,7 @@ export function parsePlacedObjects(source: string): PlacedObjectsDocument {
     objects.push({
       kind: element.name,
       id: attributeValue(element, 'Id') ?? null,
-      type: attributeValue(element, 'Type') ?? null,
+      type: attributeValue(element, typeAttributeFor(element.name)) ?? attributeValue(element, 'Type') ?? null,
       position: attributeValue(element, 'Position') ?? null,
       rotation: attributeValue(element, 'Rotation') ?? null,
       scale: attributeValue(element, 'Scale') ?? null,

@@ -16,14 +16,14 @@ answer for a running build. As of now:
 | Subsystem | Read | Write | Notes |
 |---|---|---|---|
 | Workspace staging | ✅ | ✅ | Unpacked document directories only |
-| Component inventory | ✅ | ❌ | `ComponentList`, `DocumentInfo`, dependencies — verified against real editor output |
+| Component inventory | ✅ | ⚠️ | `ComponentList` is read-only; `DocumentInfo` fields and the dependency chain are writable |
 | GameData catalogs | ✅ | ✅ | Search, inspect, resolve inheritance, find references, patch/clone/create/delete. Own document only — dependencies are not loaded |
 | MPQ archives (`.SC2Map`, `.SC2Mod`) | ✅ | ✅ | Byte-identical round trips on real ladder maps, and maps packed here open in the editor — see [docs/native-helper.md](docs/native-helper.md) |
 | Galaxy scripts | ✅ | ✅ | Parse, symbols, syntax diagnostics, safe text patching. **No type checking** — needs the game's natives. Requires the vendored toolkit to be built |
 | Triggers | ✅ | ⚠️ | Structure, names, search. Renaming only — structural editing deliberately not implemented |
 | Localization | ✅ | ✅ | Text tables, preserving BOM and CRLF exactly |
 | SC2Layout | ❌ | ❌ | Phase 10 |
-| Placed objects / regions | ✅ | ❌ | Both are XML, not binary. Read-only — writing needs an editor round-trip test |
+| Placed objects / regions | ✅ | ✅ | Both are XML, not binary. Place, move, delete — round-tripped through the editor. Terrain height is not consulted |
 | Terrain | ⚠️ | ❌ | Descriptor only (tile set, dimensions, cliff sets). Bulk data reported by magic/version/size, never decoded |
 | Editor launch | ✅ | n/a | Opens a document in the Galaxy Editor; reads its logs. Automatic **test-map launching is not provided** — no reliable mechanism verified |
 
@@ -85,7 +85,16 @@ rather than missing, because that is a very different thing from your map being 
 | `sc2_search_triggers` | yes | Find trigger elements by name |
 | `sc2_rename_trigger` | no | Rename an element (edits TriggerStrings only) |
 | `sc2_list_placed_objects` | yes | Units, doodads, and points on the map |
+| `sc2_place_object` | no | Place a unit, doodad, or point with the next free id |
+| `sc2_update_object` | no | Move, rotate, or rescale a placed object |
+| `sc2_delete_object` | no | Remove a placed object |
 | `sc2_list_regions` | yes | Regions with their shapes |
+| `sc2_create_region` | no | Add a region with the next free id |
+| `sc2_update_region` | no | Move or rename a region |
+| `sc2_delete_region` | no | Remove a region |
+| `sc2_add_dependency` | no | Append a dependency; later entries win in load order |
+| `sc2_remove_dependency` | no | Remove a dependency, matched by its `file:` half |
+| `sc2_set_document_info` | no | Set a single-valued `DocInfo` field such as `ModType` |
 | `sc2_get_terrain_summary` | yes | Terrain descriptor plus binary component headers |
 | `sc2_create_unit_from_template` | no | Clone a unit with a name, stats, and its own weapon |
 | `sc2_set_unit_weapon_damage` | no | Change one unit's damage without touching units that share it |

@@ -1,10 +1,13 @@
 /**
  * Placed objects, regions, and terrain tools (PLAN.md §27, §28, §42 Phases 15–16).
  *
- * All read-only. PLAN.md is explicit that writes here wait on codecs that have passed
- * editor round-trip tests, and none have been run. Parsing a file is not authoring one:
- * placing a unit involves id allocation, flags, and terrain-height interactions this code
- * does not model.
+ * Regions and Objects are XML, and both are now writable: edits go through the same
+ * span-splicing editor as GameData, so only the addressed bytes change. The round-trip
+ * PLAN.md asks for has been run — a map edited here repacks and opens in the Galaxy
+ * Editor with the changes intact.
+ *
+ * Terrain remains read-only. Its bulk data is a binary format whose layout has not been
+ * established, and nothing here decodes it.
  */
 
 import { readFile } from 'node:fs/promises';
@@ -12,14 +15,25 @@ import { readFile } from 'node:fs/promises';
 import type { McpServer } from '@modelcontextprotocol/server';
 import {
   BINARY_TERRAIN_FILES,
+  DOCUMENT_INFO_FILENAME,
   OBJECTS_FILENAME,
   REGIONS_FILENAME,
   SC2Error,
   TERRAIN_FILENAME,
+  addDependency,
+  createRegion,
+  deleteObject,
+  deleteRegion,
   parsePlacedObjects,
   parseRegions,
   parseTerrainSummary,
+  placeObject,
   readBinaryHeader,
+  removeDependency,
+  setDocumentInfoField,
+  updateObject,
+  updateRegion,
+  type ChangeResult,
 } from '@sc2mcp/core';
 import { z } from 'zod';
 
@@ -29,7 +43,64 @@ import { ok, toolHandler } from '../mcp-errors.js';
 const WorkspaceIdSchema = z.string().min(1).describe('Workspace id returned by sc2_open_document.');
 
 const READ_ONLY_NOTE =
-  'Read-only. Placing, moving, or deleting map objects is not implemented: that needs a codec proven by editor round-trip tests, and none has been run.';
+  'Regions and placed objects are writable; terrain bulk data is not decoded by this build.';
+
+const MutationArgsShape = {
+  workspace_id: WorkspaceIdSchema,
+  expected_revision: z.number().int().nonnegative().optional(),
+  dry_run: z.boolean().optional().describe('Defaults to TRUE. Pass false to actually write.'),
+};
+
+const ChangeResultSchema = z.object({
+  changeId: z.string(),
+  revisionBefore: z.number().int(),
+  revisionAfter: z.number().int(),
+  dryRun: z.boolean(),
+  filesChanged: z.array(
+    z.object({
+      path: z.string(),
+      beforeHash: z.string().nullable(),
+      afterHash: z.string().nullable(),
+      addedLines: z.number().int(),
+      removedLines: z.number().int(),
+      diff: z.string().nullable(),
+    }),
+  ),
+  summary: z.array(z.string()),
+  diagnostics: z.array(
+    z.object({ severity: z.enum(['error', 'warning', 'info']), code: z.string(), message: z.string(), path: z.string().optional() }),
+  ),
+  requiresRepack: z.boolean(),
+  snapshotId: z.string().nullable(),
+});
+
+function toStructured(result: ChangeResult): Record<string, unknown> {
+  return {
+    changeId: result.changeId,
+    revisionBefore: result.revisionBefore,
+    revisionAfter: result.revisionAfter,
+    dryRun: result.dryRun,
+    filesChanged: [...result.filesChanged],
+    summary: [...result.summary],
+    diagnostics: [...result.diagnostics],
+    requiresRepack: result.requiresRepack,
+    snapshotId: result.snapshotId,
+  };
+}
+
+function describeChange(result: ChangeResult): string {
+  return [
+    result.dryRun
+      ? 'DRY RUN — nothing was written. Pass dry_run=false to apply.'
+      : `Applied as ${result.changeId}; workspace is now at revision ${result.revisionAfter}.`,
+    ...result.summary.map((line) => `- ${line}`),
+    ...result.diagnostics.map((entry) => `[${entry.severity}] ${entry.message}`),
+    ...result.filesChanged.map((file) => file.diff ?? `${file.path} (+${file.addedLines}/-${file.removedLines})`),
+    result.snapshotId === null ? '' : `Revert with sc2_revert_change, or restore snapshot ${result.snapshotId}.`,
+  ]
+    .filter((line) => line !== '')
+    .join('\n');
+}
 
 export function registerMapDataTools(server: McpServer, context: ServerContext): void {
   const { workspaces, logger } = context;
@@ -228,5 +299,231 @@ export function registerMapDataTools(server: McpServer, context: ServerContext):
         { descriptor, binaryComponents, note },
       );
     }),
+  );
+
+  // ------------------------------------------------------------------ writes
+
+  /** Runs a component rewrite through the transaction engine, like every other write. */
+  async function commitComponent(
+    args: { workspace_id: string; expected_revision?: number | undefined; dry_run?: boolean | undefined },
+    operation: string,
+    fileName: string,
+    mutate: (source: string) => { content: string; summary: readonly string[] },
+  ): Promise<ReturnType<typeof ok>> {
+    const source = await readComponent(args.workspace_id, fileName);
+    const outcome = mutate(source);
+
+    const result = await workspaces.transactions.run({
+      workspaceId: args.workspace_id,
+      operation,
+      expectedRevision: args.expected_revision,
+      dryRun: args.dry_run ?? true,
+      summary: [...outcome.summary],
+      diagnostics: [],
+      files: [{ kind: 'write', path: fileName, content: outcome.content }],
+    });
+
+    return ok(describeChange(result), toStructured(result));
+  }
+
+  const ShapeSchema = z.object({
+    type: z.string().min(1).describe('"circle" or "rect", as the editor writes them.'),
+    values: z
+      .record(z.string(), z.string())
+      .describe('Shape parameters as text, e.g. {"center":"10,20","radius":"5"} for a circle.'),
+  });
+
+  server.registerTool(
+    'sc2_create_region',
+    {
+      title: 'Create a map region',
+      description:
+        'Adds a region to the Regions component with the next free id. Shape parameters are written exactly as given, because the file own precision is meaningful. Defaults to a dry run.',
+      inputSchema: z.object({
+        ...MutationArgsShape,
+        name: z.string().min(1),
+        shape: ShapeSchema,
+        markers: z.array(z.string()).optional().describe('Childless markers to carry, e.g. ["invisible"].'),
+      }),
+      outputSchema: ChangeResultSchema,
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    },
+    toolHandler({ name: 'sc2_create_region', logger }, async (args) =>
+      commitComponent(args, 'sc2_create_region', REGIONS_FILENAME, (source) =>
+        createRegion(source, { name: args.name, shape: args.shape, markers: args.markers }),
+      ),
+    ),
+  );
+
+  server.registerTool(
+    'sc2_update_region',
+    {
+      title: 'Move or rename a region',
+      description:
+        'Changes a region name or its shape parameters. Only the fields you name are touched; a radius you do not mention keeps its value. Changing a region to a different shape kind is refused, because the parameter children differ — delete and recreate instead. Defaults to a dry run.',
+      inputSchema: z.object({
+        ...MutationArgsShape,
+        region_id: z.string().min(1),
+        name: z.string().optional(),
+        shape: ShapeSchema.optional(),
+      }),
+      outputSchema: ChangeResultSchema,
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    toolHandler({ name: 'sc2_update_region', logger }, async (args) =>
+      commitComponent(args, 'sc2_update_region', REGIONS_FILENAME, (source) =>
+        updateRegion(source, args.region_id, { name: args.name, shape: args.shape }),
+      ),
+    ),
+  );
+
+  server.registerTool(
+    'sc2_delete_region',
+    {
+      title: 'Delete a map region',
+      description:
+        'Removes a region. Triggers and scripts that reference it by id will break, and nothing here can see those references, so check before deleting. Defaults to a dry run.',
+      inputSchema: z.object({ ...MutationArgsShape, region_id: z.string().min(1) }),
+      outputSchema: ChangeResultSchema,
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+    },
+    toolHandler({ name: 'sc2_delete_region', logger }, async (args) =>
+      commitComponent(args, 'sc2_delete_region', REGIONS_FILENAME, (source) => deleteRegion(source, args.region_id)),
+    ),
+  );
+
+  server.registerTool(
+    'sc2_place_object',
+    {
+      title: 'Place a unit, doodad, or point',
+      description:
+        'Adds an object to the Objects component with the next free Id. Position is "x,y,z" and is written verbatim. This does NOT consult terrain height — a z that does not match the ground will look wrong in the editor; read a nearby object position with sc2_list_placed_objects to find a sane value. Defaults to a dry run.',
+      inputSchema: z.object({
+        ...MutationArgsShape,
+        kind: z.string().min(1).describe('ObjectUnit, ObjectDoodad, or ObjectPoint.'),
+        type: z.string().optional().describe('Catalog or doodad type. Points may omit it.'),
+        position: z.string().min(1).describe('"x,y,z".'),
+        rotation: z.string().optional(),
+        scale: z.string().optional(),
+        variation: z.string().optional(),
+        flags: z.record(z.string(), z.string()).optional().describe('e.g. {"HeightAbsolute":"1"}.'),
+        attributes: z.record(z.string(), z.string()).optional().describe('Anything else, e.g. {"Player":"1"}.'),
+      }),
+      outputSchema: ChangeResultSchema,
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    },
+    toolHandler({ name: 'sc2_place_object', logger }, async (args) =>
+      commitComponent(args, 'sc2_place_object', OBJECTS_FILENAME, (source) =>
+        placeObject(source, {
+          kind: args.kind,
+          type: args.type,
+          position: args.position,
+          rotation: args.rotation,
+          scale: args.scale,
+          variation: args.variation,
+          flags: args.flags,
+          attributes: args.attributes,
+        }),
+      ),
+    ),
+  );
+
+  server.registerTool(
+    'sc2_update_object',
+    {
+      title: 'Move, rotate, or rescale a placed object',
+      description:
+        'Changes a placed object position, rotation, or scale. Setting a value it already has is reported as no change rather than manufacturing a diff. Defaults to a dry run.',
+      inputSchema: z.object({
+        ...MutationArgsShape,
+        object_id: z.string().min(1),
+        position: z.string().optional().describe('"x,y,z".'),
+        rotation: z.string().optional(),
+        scale: z.string().optional(),
+      }),
+      outputSchema: ChangeResultSchema,
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    toolHandler({ name: 'sc2_update_object', logger }, async (args) =>
+      commitComponent(args, 'sc2_update_object', OBJECTS_FILENAME, (source) =>
+        updateObject(source, args.object_id, { position: args.position, rotation: args.rotation, scale: args.scale }),
+      ),
+    ),
+  );
+
+  server.registerTool(
+    'sc2_delete_object',
+    {
+      title: 'Delete a placed object',
+      description:
+        'Removes a placed unit, doodad, or point. Triggers referencing it by id will break, and nothing here can see those references. Defaults to a dry run.',
+      inputSchema: z.object({ ...MutationArgsShape, object_id: z.string().min(1) }),
+      outputSchema: ChangeResultSchema,
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+    },
+    toolHandler({ name: 'sc2_delete_object', logger }, async (args) =>
+      commitComponent(args, 'sc2_delete_object', OBJECTS_FILENAME, (source) => deleteObject(source, args.object_id)),
+    ),
+  );
+
+  server.registerTool(
+    'sc2_add_dependency',
+    {
+      title: 'Add a dependency',
+      description:
+        'Appends a dependency to DocumentInfo. Order is load order and later wins, so a new entry goes last and overrides the ones above it. Duplicates are refused by their "file:" half, so the same mod cannot be added twice under a different display name. This build still cannot READ Blizzard stock mods — they live in CASC — so adding one does not make its objects visible to the catalog tools. Defaults to a dry run.',
+      inputSchema: z.object({
+        ...MutationArgsShape,
+        dependency: z
+          .string()
+          .min(1)
+          .describe('Full string, e.g. "bnet:Void (Mod)/0.0/999,file:Mods/Void.SC2Mod".'),
+      }),
+      outputSchema: ChangeResultSchema,
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    },
+    toolHandler({ name: 'sc2_add_dependency', logger }, async (args) =>
+      commitComponent(args, 'sc2_add_dependency', DOCUMENT_INFO_FILENAME, (source) =>
+        addDependency(source, args.dependency),
+      ),
+    ),
+  );
+
+  server.registerTool(
+    'sc2_remove_dependency',
+    {
+      title: 'Remove a dependency',
+      description:
+        'Removes a dependency from DocumentInfo, matched by its "file:" half so you can pass either the full string or just "Mods/Void.SC2Mod". Anything in the map that relied on it will break. Defaults to a dry run.',
+      inputSchema: z.object({ ...MutationArgsShape, dependency: z.string().min(1) }),
+      outputSchema: ChangeResultSchema,
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+    },
+    toolHandler({ name: 'sc2_remove_dependency', logger }, async (args) =>
+      commitComponent(args, 'sc2_remove_dependency', DOCUMENT_INFO_FILENAME, (source) =>
+        removeDependency(source, args.dependency),
+      ),
+    ),
+  );
+
+  server.registerTool(
+    'sc2_set_document_info',
+    {
+      title: 'Set a DocumentInfo field',
+      description:
+        'Sets a single-valued DocInfo field such as ModType or Icon. Dependencies are a list and are refused here — use sc2_add_dependency. Defaults to a dry run.',
+      inputSchema: z.object({
+        ...MutationArgsShape,
+        field: z.string().min(1).describe('e.g. "ModType", "Icon".'),
+        value: z.string(),
+      }),
+      outputSchema: ChangeResultSchema,
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    toolHandler({ name: 'sc2_set_document_info', logger }, async (args) =>
+      commitComponent(args, 'sc2_set_document_info', DOCUMENT_INFO_FILENAME, (source) =>
+        setDocumentInfoField(source, args.field, args.value),
+      ),
+    ),
   );
 }

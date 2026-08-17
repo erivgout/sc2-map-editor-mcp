@@ -19,13 +19,13 @@ the sidecar binary is not there.
 |---|---|---|---|
 | Workspace staging | ✅ | ✅ | Unpacked document directories. Packed archives need the MPQ helper. |
 | `ComponentList.SC2Components` | ✅ | ❌ | Parsed and resolved to real files. |
-| `DocumentInfo` | ✅ | ❌ | Including the dependency chain in resolution order. |
+| `DocumentInfo` | ✅ | ✅ | Dependency chain in resolution order; add/remove dependencies and set fields. |
 | GameData catalogs | ✅ | ✅ | Search, inheritance, references, patch/clone/create/delete. |
 | Localized text | ✅ | ✅ | BOM and CRLF preserved exactly. |
 | Galaxy scripts | ✅ | ✅ | Syntax only — see below. Needs the vendored toolkit built. |
 | Triggers | ✅ | ⚠️ | Structure and names readable; **renaming only**. |
-| Placed objects (`Objects`) | ✅ | ❌ | XML, not binary. |
-| Regions | ✅ | ❌ | XML, not binary. |
+| Placed objects (`Objects`) | ✅ | ✅ | XML, not binary. Place, move, delete; terrain height is not consulted. |
+| Regions | ✅ | ✅ | XML, not binary. Create, move, rename, delete. |
 | Terrain | ⚠️ | ❌ | Descriptor only; bulk data reported by header, never decoded. |
 | MPQ archives | ✅ | ✅ | Byte-identical round trips on real ladder maps; repacked maps open in the editor. |
 | Local dependency archives | ✅ | ❌ | Unpacked `.SC2Mod` directories are indexed; contents are read-only. |
@@ -62,10 +62,19 @@ editor-internal identifiers whose allocation rules are not documented anywhere r
 Renaming is the one write, and it is safe precisely because it edits `TriggerStrings.txt`
 rather than the trigger data.
 
-**Placed objects and terrain writing.** PLAN.md §27 and §28 require a codec validated by
-editor round-trip tests before any write. None has been run. Placing a unit is not just
-appending XML — it involves id allocation, flag semantics, and interaction with terrain
-height that this code does not model.
+**Placed objects and regions: writable. Terrain: not.** PLAN.md §27 required a codec
+validated by an editor round trip before any write, and that has now been run — a real map
+had a region and a unit added through these tools, was repacked, and opened in the Galaxy
+Editor with no alerts and the edits intact.
+
+Two things are still not modelled, and both are stated at the tool rather than assumed
+away. Terrain height is not consulted, so a placed object's `z` is written exactly as given
+rather than snapped to the ground. And nothing here can see trigger or script references to
+an object, so deleting one that something else uses will break it silently.
+
+The convention that types are named `UnitType` on `<ObjectUnit>` but `Type` on points and
+doodads was taken from 181 real entries in editor output, not assumed — reading only `Type`
+had been reporting every placed unit in a real map as untyped.
 
 **Terrain bulk data.** `t3Terrain.xml` is a readable descriptor. The height map, texture
 masks, cell flags, and sync data are binary formats whose layouts have not been

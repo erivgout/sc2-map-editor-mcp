@@ -89,10 +89,12 @@ export const IMPLEMENTED: ServerCapabilities = Object.freeze({
   localization: { read: true, write: true },
   layout: { read: false, write: false },
   // Phase 15. Objects and Regions turned out to be plain XML rather than the binary
-  // formats PLAN.md §27 anticipated, so reading them needs no reverse engineering.
-  // Writing stays false: §27 requires a codec proven by editor round-trip tests, and
-  // placing a unit involves id allocation and terrain interactions this does not model.
-  objects: { read: true, write: false },
+  // formats PLAN.md §27 anticipated, so neither reading nor writing needs reverse
+  // engineering — edits splice bytes the same way GameData does. §27's round-trip gate has
+  // been met: a map edited here repacks and reopens in the Galaxy Editor with the changes
+  // intact and no alerts. Terrain height is still not modelled, so a placed object's z is
+  // written exactly as given rather than snapped to the ground.
+  objects: { read: true, write: true },
   // Phase 16. Only the t3Terrain.xml descriptor is read. The bulk data (heights,
   // texture masks, cell flags) is reported by four-character code, version, and size
   // only — decoding it would be guesswork, which §28 forbids without validated codecs.

@@ -100,6 +100,7 @@ describe('MCP server', () => {
     const names = tools.map((tool) => tool.name).sort();
 
     expect(names).toEqual([
+      'sc2_add_dependency',
       'sc2_apply_galaxy_patch',
       'sc2_check_shared_object',
       'sc2_clone_catalog_object',
@@ -107,9 +108,12 @@ describe('MCP server', () => {
       'sc2_copy_text_key',
       'sc2_create_catalog_object',
       'sc2_create_galaxy_file',
+      'sc2_create_region',
       'sc2_create_snapshot',
       'sc2_create_unit_from_template',
       'sc2_delete_catalog_object',
+      'sc2_delete_object',
+      'sc2_delete_region',
       'sc2_delete_text_key',
       'sc2_detect_installations',
       'sc2_diff_workspace',
@@ -145,7 +149,9 @@ describe('MCP server', () => {
       'sc2_list_workspaces',
       'sc2_open_document',
       'sc2_patch_catalog_object',
+      'sc2_place_object',
       'sc2_read_file',
+      'sc2_remove_dependency',
       'sc2_rename_trigger',
       'sc2_resolve_catalog_object',
       'sc2_restore_snapshot',
@@ -154,8 +160,11 @@ describe('MCP server', () => {
       'sc2_search_files',
       'sc2_search_text_keys',
       'sc2_search_triggers',
+      'sc2_set_document_info',
       'sc2_set_text_value',
       'sc2_set_unit_weapon_damage',
+      'sc2_update_object',
+      'sc2_update_region',
       'sc2_validate_document',
     ]);
 
@@ -196,7 +205,9 @@ describe('MCP server', () => {
     // ...and nothing that depends on an unbuilt backend claims to.
     expect(capabilities['mpq']).toEqual({ read: false, write: false });
     expect(capabilities['terrain']).toEqual({ read: true, write: false });
-    expect(capabilities['objects']).toEqual({ read: true, write: false });
+    // Objects and Regions are plain XML and need no external backend, so they are writable
+    // wherever the server runs.
+    expect(capabilities['objects']).toEqual({ read: true, write: true });
     expect(capabilities['triggers']).toEqual({ read: true, write: false });
     expect(capabilities['localization']).toEqual({ read: true, write: true });
     // Galaxy is implemented but gated on the vendored toolkit, which this harness skips.

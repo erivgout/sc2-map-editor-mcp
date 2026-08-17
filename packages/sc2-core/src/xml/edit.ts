@@ -155,6 +155,11 @@ export class XmlEditor {
     return this.#buffer.isEmpty;
   }
 
+  /** The file's own newline convention, for callers rendering multi-line insertions. */
+  get newline(): '\r\n' | '\n' {
+    return detectNewline(this.source);
+  }
+
   get edits(): readonly TextEdit[] {
     return this.#buffer.edits;
   }
