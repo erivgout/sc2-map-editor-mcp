@@ -3,9 +3,10 @@
 An MCP server that lets a coding agent inspect and edit StarCraft II maps and mods by
 manipulating their file contents directly, instead of driving the Galaxy Editor UI.
 
-**Status: early. See [Current capabilities](#current-capabilities) before relying on
-anything.** The build plan is [PLAN.md](PLAN.md); this README describes what exists
-today, which is a small fraction of it.
+**Status: pre-release.** Most of [PLAN.md](PLAN.md) is implemented, with the gaps stated
+explicitly rather than glossed. Read [Current capabilities](#current-capabilities), or ask
+a running server via `sc2_get_server_info` — that is the authoritative answer for a
+particular build and machine.
 
 ## Current capabilities
 
@@ -26,13 +27,18 @@ answer for a running build. As of now:
 | Terrain | ⚠️ | ❌ | Descriptor only (tile set, dimensions, cliff sets). Bulk data reported by magic/version/size, never decoded |
 | Editor launch | ✅ | n/a | Opens a document in the Galaxy Editor; reads its logs. Automatic **test-map launching is not provided** — no reliable mechanism verified |
 
-Raw text search and file reading work on any staged document, so the server is already
-useful for inspecting an unpacked map — just not for understanding it semantically.
+Why the gaps are where they are, and what "⚠️" means in each row:
+[docs/capabilities.md](docs/capabilities.md).
 
 ⚠️ The `sc2mpq` helper that reads packed archives is written and wired in, but building it
 needs a C++ toolchain plus the Windows SDK, which was unavailable on the machine this was
 developed on. Until it is compiled and round-trip tested, `sc2_open_document` refuses
 packed archives with a clear error, and `capabilities.mpq` reports `false`.
+
+**Dependency archives are never loaded.** Every catalog answer covers the open document
+only, so "not found" means "not in this document" — not "does not exist". This is the
+easiest way to draw a wrong conclusion from the server's output, and every tool that could
+be misread on it says so in its result.
 
 ### Tools
 
@@ -178,6 +184,7 @@ apps/sc2-mcp-server/     MCP protocol layer: tools, schemas, error translation, 
 packages/sc2-core/       Domain layer: config, path guard, workspace staging, MPQ adapter
 packages/sc2-test-utils/ Test fixtures and temp-directory helpers
 native/sc2mpq/           C++ MPQ sidecar (StormLib), built separately
+docs/                    capabilities.md, sc2-formats.md, native-helper.md, galaxy.md
 docs/adr/                Architecture decision records
 vendor/PINS.json         Pinned upstream sources (checkouts are gitignored)
 scripts/                 bootstrap.ps1 (fetch pins), build-native.ps1 (build the sidecar)
