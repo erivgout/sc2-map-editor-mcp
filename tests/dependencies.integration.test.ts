@@ -97,6 +97,10 @@ describe('dependency loading', () => {
     client = new Client({ name: 'deps-test', version: '0.0.0' });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    // Populates the client's output-schema validator cache. Without this the client skips
+    // validation entirely, and a tool whose declared outputSchema has drifted from what it
+    // actually returns passes here while a real client rejects the call.
+    await client.listTools();
 
     const opened = await call('sc2_open_document', { source_path: mapPath });
     workspaceId = (opened.structured['workspace'] as Record<string, unknown>)['id'] as string;

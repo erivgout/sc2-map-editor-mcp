@@ -65,6 +65,8 @@ describe.skipIf(!toolkit.available)('Galaxy tools', () => {
     client = new Client({ name: 'galaxy-test', version: '0.0.0' });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    // See dependencies.integration.test.ts: this is what turns on output-schema validation.
+    await client.listTools();
 
     const opened = await call('sc2_open_document', { source_path: sourceDir });
     workspaceId = (opened.structured['workspace'] as Record<string, unknown>)['id'] as string;

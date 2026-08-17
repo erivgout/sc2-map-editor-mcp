@@ -92,6 +92,8 @@ describe.skipIf(!enabled)('packed map workflow', () => {
     client = new Client({ name: 'packed-test', version: '0.0.0' });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    // See dependencies.integration.test.ts: this is what turns on output-schema validation.
+    await client.listTools();
 
     const opened = await call('sc2_open_document', { source_path: packedMap! });
     expect(opened.isError, opened.text).toBe(false);

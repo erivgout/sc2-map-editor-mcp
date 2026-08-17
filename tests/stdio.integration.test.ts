@@ -55,6 +55,8 @@ describe.skipIf(!existsSync(serverEntry))('stdio transport (built server)', () =
 
     client = new Client({ name: 'sc2-mcp-stdio-test', version: '0.0.0' });
     await client.connect(transport);
+    // See dependencies.integration.test.ts: this is what turns on output-schema validation.
+    await client.listTools();
   }, 60_000);
 
   afterAll(async () => {

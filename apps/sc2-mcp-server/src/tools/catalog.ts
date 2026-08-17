@@ -19,8 +19,19 @@ import { ok, toolHandler } from '../mcp-errors.js';
 const WorkspaceIdSchema = z.string().min(1).describe('Workspace id returned by sc2_open_document.');
 const MAX_RESULTS = 200;
 
-const DEPENDENCY_CAVEAT =
-  'Only this document\'s own GameData is indexed; dependency archives are not loaded, so an absent object may simply live in a dependency.';
+/**
+ * What the index actually covers, stated per call rather than as a constant: local
+ * dependency archives load, Blizzard's CASC-resident ones do not, so "absent" means
+ * different things depending on which of those a document leans on.
+ */
+function dependencyCaveat(index: { stats(): { loadedDependencies: readonly string[] } }): string {
+  const loaded = index.stats().loadedDependencies;
+  const base =
+    loaded.length === 0
+      ? 'No dependency archives are loaded for this document, so only its own GameData is indexed.'
+      : `Indexed alongside this document: ${loaded.join(', ')}.`;
+  return `${base} Blizzard's stock dependencies live in the installation's CASC store, which this build cannot read — an absent object may simply be defined in one of those.`;
+}
 
 export function registerCatalogTools(server: McpServer, context: ServerContext): void {
   const { workspaces, logger } = context;
@@ -40,6 +51,9 @@ export function registerCatalogTools(server: McpServer, context: ServerContext):
           entryCount: z.number().int(),
           domainCount: z.number().int(),
           unknownDomainCount: z.number().int(),
+          documentEntryCount: z.number().int(),
+          dependencyEntryCount: z.number().int(),
+          loadedDependencies: z.array(z.string()),
         }),
         diagnostics: z.array(z.object({ severity: z.string(), code: z.string(), message: z.string(), path: z.string() })),
       }),
@@ -53,8 +67,11 @@ export function registerCatalogTools(server: McpServer, context: ServerContext):
       const lines = [
         `${stats.entryCount} catalog entries across ${stats.domainCount} domain(s), from ${stats.fileCount} file(s).`,
         ...present.map((entry) => `  ${entry.domain}: ${entry.count}`),
+        stats.dependencyEntryCount > 0
+          ? `${stats.documentEntryCount} defined by the document itself, ${stats.dependencyEntryCount} by dependency archives.`
+          : '',
         stats.unknownDomainCount > 0 ? `${stats.unknownDomainCount} entry/entries have a type whose domain is unrecognised.` : '',
-        DEPENDENCY_CAVEAT,
+        dependencyCaveat(index),
       ].filter((line) => line !== '');
 
       return ok(lines.join('\n'), {
@@ -90,6 +107,8 @@ export function registerCatalogTools(server: McpServer, context: ServerContext):
             sourcePath: z.string(),
             line: z.number().int(),
             fieldCount: z.number().int(),
+            layer: z.enum(['document', 'dependency']),
+            origin: z.string().nullable(),
           }),
         ),
         nextOffset: z.number().int().nullable(),
@@ -118,12 +137,14 @@ export function registerCatalogTools(server: McpServer, context: ServerContext):
 
       const lines = [
         `${total} match(es); showing ${results.length} from offset ${offset}.`,
-        ...results.map((entry) => `  ${entry.domain}/${entry.id} <${entry.ctype}>${entry.parent === null ? '' : ` parent=${entry.parent}`} — ${entry.sourcePath}:${entry.line}`),
+        // The origin marker matters for more than provenance: a dependency-owned object
+        // cannot be edited, so seeing it here saves a failed mutation.
+        ...results.map((entry) => `  ${entry.domain}/${entry.id} <${entry.ctype}>${entry.parent === null ? '' : ` parent=${entry.parent}`}${entry.origin === null ? '' : ` [from ${entry.origin}, read-only]`} — ${entry.sourcePath}:${entry.line}`),
         nextOffset === null ? '' : `More results: pass offset=${nextOffset}.`,
-        DEPENDENCY_CAVEAT,
+        dependencyCaveat(index),
       ].filter((line) => line !== '');
 
-      return ok(lines.join('\n'), { total, results, nextOffset, note: DEPENDENCY_CAVEAT });
+      return ok(lines.join('\n'), { total, results, nextOffset, note: dependencyCaveat(index) });
     }),
   );
 
@@ -170,7 +191,7 @@ export function registerCatalogTools(server: McpServer, context: ServerContext):
           suggestedAction:
             elsewhere.length > 0
               ? `An object with that id exists in: ${elsewhere.map((other) => other.domain ?? '?').join(', ')}.`
-              : `Use sc2_search_catalog to find the right id. ${DEPENDENCY_CAVEAT}`,
+              : `Use sc2_search_catalog to find the right id. ${dependencyCaveat(index)}`,
         });
       }
 
@@ -229,6 +250,8 @@ export function registerCatalogTools(server: McpServer, context: ServerContext):
             definedBy: z.string(),
             sourcePath: z.string(),
             line: z.number().int(),
+            layer: z.enum(['document', 'dependency']),
+            origin: z.string().nullable(),
           }),
         ),
         complete: z.boolean(),
@@ -306,7 +329,7 @@ export function registerCatalogTools(server: McpServer, context: ServerContext):
 
       const note = shared
         ? `${catalogKey(args.domain, args.id)} is referenced by ${distinctReferrers.size} distinct objects. Editing it changes behaviour for all of them; clone it first if you only mean to affect one.`
-        : `${catalogKey(args.domain, args.id)} has ${distinctReferrers.size} distinct referrer(s) in this document. ${DEPENDENCY_CAVEAT}`;
+        : `${catalogKey(args.domain, args.id)} has ${distinctReferrers.size} distinct referrer(s) in this document. ${dependencyCaveat(index)}`;
 
       const lines = [
         `${all.length} reference(s) from ${distinctReferrers.size} object(s).`,
