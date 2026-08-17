@@ -7,6 +7,7 @@
 
 export * from './archive/index.js';
 export * from './capabilities.js';
+export * from './changes/index.js';
 export * from './components/index.js';
 export * from './config.js';
 export * from './errors.js';

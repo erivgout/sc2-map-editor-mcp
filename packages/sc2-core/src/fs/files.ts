@@ -46,7 +46,21 @@ export async function pathExists(target: string): Promise<boolean> {
     await stat(target);
     return true;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    const code = (error as NodeJS.ErrnoException).code;
+    // ENOTDIR means a path component is a file rather than a directory, so the target
+    // cannot exist. Treating it as an error instead of "absent" turns a perfectly
+    // answerable question into a crash.
+    if (code === 'ENOENT' || code === 'ENOTDIR') return false;
+    throw error;
+  }
+}
+
+export async function isRegularFile(target: string): Promise<boolean> {
+  try {
+    return (await stat(target)).isFile();
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') return false;
     throw error;
   }
 }

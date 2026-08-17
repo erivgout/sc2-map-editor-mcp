@@ -52,6 +52,12 @@ packed archives with a clear error, and `capabilities.mpq` reports `false`.
 | `sc2_get_catalog_object` | yes | One object's own declaration, plus verbatim XML |
 | `sc2_resolve_catalog_object` | yes | Effective values with inheritance, and where each came from |
 | `sc2_find_catalog_references` | yes | What refers to an object, and whether it is shared |
+| `sc2_diff_workspace` | yes | Unified diff against the source, or against a snapshot |
+| `sc2_get_changes` | yes | Change history, with the snapshot taken before each |
+| `sc2_revert_change` | no | Undo the most recent change |
+| `sc2_create_snapshot` | no | Pin a known-good state |
+| `sc2_list_snapshots` | yes | Snapshots held for a workspace |
+| `sc2_restore_snapshot` | no | Roll the staging tree back to a snapshot |
 | `sc2_list_files` | yes | Paginated listing of the staged tree |
 | `sc2_read_file` | yes | Read one staged file (text, or base64 for binary) |
 | `sc2_search_files` | yes | Literal substring search across staged text files |
@@ -72,6 +78,11 @@ defaults are conservative:
 - **Unimplemented means unimplemented.** A capability flag is only `true` when the code
   exists *and* its backend is present on this machine. The server would rather tell you
   it cannot do something than guess.
+- **Edits are lossless, previewable, and reversible.** XML changes splice exact byte
+  ranges, so everything outside the edit — comments, attribute order, CRLF endings,
+  whether the file ends in a newline — comes out identical. Every mutation snapshots
+  first, supports `dry_run`, produces a unified diff, rolls back completely if any part
+  fails, and can be reverted afterwards.
 
 ## Requirements
 

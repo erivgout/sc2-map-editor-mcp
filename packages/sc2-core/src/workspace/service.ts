@@ -19,7 +19,8 @@ import {
 } from '../components/index.js';
 import type { ServerConfig } from '../config.js';
 import { SC2Error } from '../errors.js';
-import { copyDirectory, walkFiles, type WalkOptions, type WalkedFile } from '../fs/index.js';
+import { TransactionEngine, diffText, formatUnifiedDiff, type ChangedFile } from '../changes/index.js';
+import { copyDirectory, hashBuffer, walkFiles, type WalkOptions, type WalkedFile } from '../fs/index.js';
 import { CatalogIndex, type CatalogSource } from '../gamedata/index.js';
 import type { Logger } from '../logging.js';
 import { resolveArchiveMemberPath, type PathGuard } from '../paths.js';
@@ -102,6 +103,7 @@ export class WorkspaceService {
    * `<workspaceId>@<revision>` so a stale entry can never be served after a mutation.
    */
   readonly #catalogCache = new Map<string, CatalogIndex>();
+  readonly #transactions: TransactionEngine;
 
   constructor(options: WorkspaceServiceOptions) {
     this.#config = options.config;
@@ -109,10 +111,23 @@ export class WorkspaceService {
     this.#store = options.store;
     this.#logger = options.logger;
     this.#mpqExtractor = options.mpqExtractor;
+    this.#transactions = new TransactionEngine({
+      store: options.store,
+      logger: options.logger,
+      walkLimits: {
+        maxFiles: options.config.maxExtractedFiles,
+        maxFileBytes: options.config.maxSingleFileBytes,
+      },
+    });
   }
 
   get store(): WorkspaceStore {
     return this.#store;
+  }
+
+  /** The change engine every mutating operation must go through (PLAN.md §13). */
+  get transactions(): TransactionEngine {
+    return this.#transactions;
   }
 
   /** Walk limits derived from config. Applied to both source and staged trees. */
@@ -418,6 +433,61 @@ export class WorkspaceService {
     this.#logger.debug('catalog index built', { workspaceId, revision: state.revision, ...stats });
 
     return index;
+  }
+
+  /**
+   * Diffs the staged tree against the original source.
+   *
+   * Only possible for directory sources: a packed archive would have to be re-extracted
+   * to compare against, which needs the MPQ helper. Rather than silently returning an
+   * empty diff, packed workspaces get an explicit refusal.
+   */
+  async diffAgainstSource(workspaceId: string): Promise<ChangedFile[]> {
+    const state = await this.#store.read(workspaceId);
+    if (state.sourceKind !== 'directory') {
+      throw new SC2Error(
+        'SC2_UNSUPPORTED_OPERATION',
+        'Diffing against a packed source needs the MPQ helper, which this build does not have.',
+        {
+          workspaceId,
+          recoverable: false,
+          suggestedAction: 'Use sc2_create_snapshot before editing, then diff against that snapshot instead.',
+        },
+      );
+    }
+
+    const layout = this.#store.layoutFor(workspaceId);
+    const [current, original] = await Promise.all([
+      walkFiles(layout.workingPath, this.#walkLimits()),
+      walkFiles(state.sourcePath, this.#walkLimits()),
+    ]);
+
+    const currentMap = new Map(current.map((file) => [file.relativePath, file.absolutePath]));
+    const originalMap = new Map(original.map((file) => [file.relativePath, file.absolutePath]));
+    const allPaths = [...new Set([...currentMap.keys(), ...originalMap.keys()])].sort();
+
+    const changed: ChangedFile[] = [];
+    for (const relativePath of allPaths) {
+      const beforePath = originalMap.get(relativePath);
+      const afterPath = currentMap.get(relativePath);
+
+      const beforeBuffer = beforePath === undefined ? null : await readFile(beforePath);
+      const afterBuffer = afterPath === undefined ? null : await readFile(afterPath);
+
+      if (beforeBuffer !== null && afterBuffer !== null && beforeBuffer.equals(afterBuffer)) continue;
+
+      const diff = diffText(relativePath, beforeBuffer?.toString('utf8') ?? '', afterBuffer?.toString('utf8') ?? '');
+      changed.push({
+        path: relativePath,
+        beforeHash: beforeBuffer === null ? null : hashBuffer(beforeBuffer),
+        afterHash: afterBuffer === null ? null : hashBuffer(afterBuffer),
+        addedLines: diff.addedLines,
+        removedLines: diff.removedLines,
+        diff: formatUnifiedDiff(diff) || null,
+      });
+    }
+
+    return changed;
   }
 
   /** Absolute path of the staged tree, for messages and user-facing hints. */

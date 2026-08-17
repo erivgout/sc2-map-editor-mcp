@@ -8,6 +8,7 @@
  * verify. The workspace cases cover Phase 2's exit criterion.
  */
 
+import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { Client } from '@modelcontextprotocol/client';
@@ -98,10 +99,13 @@ describe('MCP server', () => {
     const names = tools.map((tool) => tool.name).sort();
 
     expect(names).toEqual([
+      'sc2_create_snapshot',
       'sc2_detect_installations',
+      'sc2_diff_workspace',
       'sc2_discard_workspace',
       'sc2_find_catalog_references',
       'sc2_get_catalog_object',
+      'sc2_get_changes',
       'sc2_get_dependencies',
       'sc2_get_document_info',
       'sc2_get_document_summary',
@@ -110,10 +114,13 @@ describe('MCP server', () => {
       'sc2_list_component_types',
       'sc2_list_components',
       'sc2_list_files',
+      'sc2_list_snapshots',
       'sc2_list_workspaces',
       'sc2_open_document',
       'sc2_read_file',
       'sc2_resolve_catalog_object',
+      'sc2_restore_snapshot',
+      'sc2_revert_change',
       'sc2_search_catalog',
       'sc2_search_files',
     ]);
@@ -135,6 +142,13 @@ describe('MCP server', () => {
     expect(byName.get('sc2_discard_workspace')?.annotations?.destructiveHint).toBe(true);
     expect(byName.get('sc2_get_server_info')?.annotations?.readOnlyHint).toBe(true);
     expect(byName.get('sc2_read_file')?.annotations?.readOnlyHint).toBe(true);
+
+    // Restoring a snapshot discards every later change, so it is destructive; taking one
+    // writes files but can never lose anything, so it is not.
+    expect(byName.get('sc2_restore_snapshot')?.annotations?.destructiveHint).toBe(true);
+    expect(byName.get('sc2_revert_change')?.annotations?.destructiveHint).toBe(true);
+    expect(byName.get('sc2_create_snapshot')?.annotations?.readOnlyHint).toBe(false);
+    expect(byName.get('sc2_create_snapshot')?.annotations?.destructiveHint).toBe(false);
   });
 
   it('reports honest capabilities from sc2_get_server_info', async () => {
@@ -421,6 +435,93 @@ describe('MCP server', () => {
     // An empty result for a typo'd domain would read as "this map has no units".
     expect(outcome.isError).toBe(true);
     expect((outcome.structured['error'] as Record<string, unknown>)['code']).toBe('SC2_INVALID_ARGUMENT');
+  });
+
+  it('reports an unmodified workspace as having no changes and no diff', async () => {
+    const opened = await callTool(harness.client, 'sc2_open_document', { source_path: harness.sourceDir });
+    const workspaceId = (opened.structured['workspace'] as Record<string, unknown>)['id'] as string;
+
+    const diff = await callTool(harness.client, 'sc2_diff_workspace', { workspace_id: workspaceId });
+    expect(diff.structured['filesChanged']).toEqual([]);
+    expect(diff.structured['comparedAgainst']).toContain('original source');
+
+    const changes = await callTool(harness.client, 'sc2_get_changes', { workspace_id: workspaceId });
+    expect(changes.structured['changes']).toEqual([]);
+    expect(changes.structured['currentRevision']).toBe(0);
+  });
+
+  it('snapshots, then sees the staged edit in a diff against that snapshot', async () => {
+    const opened = await callTool(harness.client, 'sc2_open_document', { source_path: harness.sourceDir });
+    const workspaceId = (opened.structured['workspace'] as Record<string, unknown>)['id'] as string;
+    const stagingPath = (opened.structured['workspace'] as Record<string, unknown>)['stagingPath'] as string;
+
+    const snapshot = await callTool(harness.client, 'sc2_create_snapshot', {
+      workspace_id: workspaceId,
+      label: 'before hand edit',
+    });
+    const snapshotId = snapshot.structured['snapshotId'] as string;
+    expect(snapshotId).toMatch(/^snap_/);
+
+    // Stand in for a mutating tool (Phase 8) by editing the staging tree directly — which
+    // is also what happens if the user opens it in the editor (PLAN.md §50).
+    await writeFile(path.join(stagingPath, 'DocumentInfo'), 'EDITED OUTSIDE\n', 'utf8');
+
+    const diff = await callTool(harness.client, 'sc2_diff_workspace', {
+      workspace_id: workspaceId,
+      snapshot_id: snapshotId,
+    });
+    const changed = diff.structured['filesChanged'] as { path: string; diff: string }[];
+    expect(changed.map((file) => file.path)).toEqual(['DocumentInfo']);
+    expect(changed[0]?.diff).toContain('+EDITED OUTSIDE');
+
+    // Restoring puts it back and moves the revision forward, never backward.
+    const restored = await callTool(harness.client, 'sc2_restore_snapshot', {
+      workspace_id: workspaceId,
+      snapshot_id: snapshotId,
+    });
+    expect(restored.structured['revisionAfter']).toBe(1);
+
+    const afterRestore = await callTool(harness.client, 'sc2_diff_workspace', {
+      workspace_id: workspaceId,
+      snapshot_id: snapshotId,
+    });
+    expect(afterRestore.structured['filesChanged']).toEqual([]);
+  });
+
+  it('lists snapshots with their labels', async () => {
+    const opened = await callTool(harness.client, 'sc2_open_document', { source_path: harness.sourceDir });
+    const workspaceId = (opened.structured['workspace'] as Record<string, unknown>)['id'] as string;
+
+    await callTool(harness.client, 'sc2_create_snapshot', { workspace_id: workspaceId, label: 'checkpoint' });
+    const listed = await callTool(harness.client, 'sc2_list_snapshots', { workspace_id: workspaceId });
+
+    const snapshots = listed.structured['snapshots'] as { label: string }[];
+    expect(snapshots).toHaveLength(1);
+    expect(snapshots[0]?.label).toBe('checkpoint');
+  });
+
+  it('refuses to snapshot or restore a read-only workspace', async () => {
+    const opened = await callTool(harness.client, 'sc2_open_document', {
+      source_path: harness.sourceDir,
+      read_only: true,
+    });
+    const workspaceId = (opened.structured['workspace'] as Record<string, unknown>)['id'] as string;
+
+    const outcome = await callTool(harness.client, 'sc2_create_snapshot', { workspace_id: workspaceId });
+    expect(outcome.isError).toBe(true);
+    expect((outcome.structured['error'] as Record<string, unknown>)['code']).toBe('SC2_UNSUPPORTED_OPERATION');
+  });
+
+  it('reports an unknown snapshot as SC2_NOT_FOUND', async () => {
+    const opened = await callTool(harness.client, 'sc2_open_document', { source_path: harness.sourceDir });
+    const workspaceId = (opened.structured['workspace'] as Record<string, unknown>)['id'] as string;
+
+    const outcome = await callTool(harness.client, 'sc2_restore_snapshot', {
+      workspace_id: workspaceId,
+      snapshot_id: 'snap_does_not_exist',
+    });
+    expect(outcome.isError).toBe(true);
+    expect((outcome.structured['error'] as Record<string, unknown>)['code']).toBe('SC2_NOT_FOUND');
   });
 
   it('lists workspaces so an id can be recovered after a reconnect', async () => {

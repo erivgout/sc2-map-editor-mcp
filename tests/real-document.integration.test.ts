@@ -16,16 +16,22 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import {
+  attributeValue,
+  childElements,
   configFromObject,
   createNullLogger,
   detectInstallations,
+  diffText,
+  parseCatalogFile,
   parseComponentList,
   parseDocumentInfo,
+  parseXml,
   selectInstallation,
   walkFiles,
   PathGuard,
   WorkspaceService,
   WorkspaceStore,
+  XmlEditor,
 } from '@sc2mcp/core';
 import { createTempDir, type TempDir } from '@sc2mcp/test-utils';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -91,6 +97,56 @@ describe.skipIf(mapPath === null)('real editor-produced document', () => {
       expect(dependency.raw).not.toBe('');
       expect(dependency.bnet ?? dependency.file, `dependency parsed to nothing: ${dependency.raw}`).toBeTruthy();
     }
+  });
+
+  it('edits a real 200 KB catalog file and changes nothing but the target bytes', async () => {
+    // The strongest losslessness check available: genuine editor output, not a fixture we
+    // wrote to suit the parser (PLAN.md §12, §55 rule 1).
+    const catalogPath = path.join(documentPath, 'Base.SC2Data', 'GameData', 'UnitData.xml');
+    const source = await readFile(catalogPath, 'utf8');
+    expect(source.length).toBeGreaterThan(100_000);
+
+    const file = parseCatalogFile(source, 'Base.SC2Data/GameData/UnitData.xml');
+    const target = file.entries.find((entry) =>
+      entry.fields.some((field) => field.name === 'LifeMax' && field.value !== null),
+    );
+    expect(target, 'expected at least one unit declaring LifeMax').toBeDefined();
+    if (target === undefined) return;
+
+    const document = parseXml(source);
+    const entryElement = childElements(document.root!).find(
+      (element) => attributeValue(element, 'id') === target.id && element.name === target.ctype,
+    );
+    expect(entryElement).toBeDefined();
+    if (entryElement === undefined) return;
+
+    const lifeMax = childElements(entryElement, 'LifeMax')[0];
+    expect(lifeMax).toBeDefined();
+    if (lifeMax === undefined) return;
+
+    const valueAttribute = lifeMax.attributes.find((attribute) => attribute.name === 'value');
+    expect(valueAttribute).toBeDefined();
+    if (valueAttribute === undefined) return;
+
+    const editor = new XmlEditor(source);
+    editor.setAttributeValue(lifeMax, 'value', '123456');
+    const edited = editor.apply();
+
+    // Exactly one line differs, and it is the one we targeted.
+    const diff = diffText('UnitData.xml', source, edited);
+    expect(diff.addedLines).toBe(1);
+    expect(diff.removedLines).toBe(1);
+
+    // Byte-level proof: splicing the new value into the original produces the same string,
+    // so every one of the other ~200,000 bytes is untouched.
+    const spliced = source.slice(0, valueAttribute.valueSpan.start) + '123456' + source.slice(valueAttribute.valueSpan.end);
+    expect(edited).toBe(spliced);
+
+    // And it still parses to the same shape, with the new value in place.
+    const reparsed = parseCatalogFile(edited, 'Base.SC2Data/GameData/UnitData.xml');
+    expect(reparsed.entries).toHaveLength(file.entries.length);
+    const reparsedTarget = reparsed.entries.find((entry) => entry.id === target.id);
+    expect(reparsedTarget?.fields.find((field) => field.name === 'LifeMax')?.value).toBe('123456');
   });
 
   it('locates the installation and reports the current build', async () => {
