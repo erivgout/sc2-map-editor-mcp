@@ -215,9 +215,9 @@ translate the result. SC2 parsing never lives in a tool handler.
 
 ## Licensing and content
 
-MIT — see [LICENSE](LICENSE). Not affiliated with or endorsed by Blizzard Entertainment.
-Third-party sources fetched by `scripts/bootstrap.ps1` keep their own licenses; what is
-pinned and where it comes from is recorded in `vendor/PINS.json`.
+MIT — see [LICENSE](LICENSE). Trademark and third-party notices are in
+[NOTICE.md](NOTICE.md); this project is not affiliated with or endorsed by Blizzard
+Entertainment.
 
 No Blizzard assets, extracted game data, or copyrighted map content is included in this
 repository, and none will be. Test fixtures are project-authored placeholders — useful

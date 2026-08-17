@@ -19,13 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
----
-
-This project is not affiliated with or endorsed by Blizzard Entertainment.
-StarCraft II is a trademark of Blizzard Entertainment, Inc. No Blizzard game
-assets or data are included in this repository.
-
-Third-party components fetched by scripts/bootstrap.ps1 carry their own
-licenses; see vendor/PINS.json for what is pinned and where it comes from.
-StormLib is distributed under the MIT license.
