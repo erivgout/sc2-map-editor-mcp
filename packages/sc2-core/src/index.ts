@@ -5,6 +5,7 @@
  * call into these services, and translate results (PLAN.md §4).
  */
 
+export * from './archive/index.js';
 export * from './capabilities.js';
 export * from './config.js';
 export * from './errors.js';

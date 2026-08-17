@@ -58,8 +58,10 @@ async function createHarness(): Promise<Harness> {
   const context = await createContext({
     config,
     logger: createNullLogger(),
-    // Keep the test independent of whether this machine has StarCraft II installed.
+    // Keep the test independent of whether this machine has StarCraft II installed, or
+    // whether the developer happened to have built the native helper.
     skipInstallationDetection: true,
+    skipMpqHelperProbe: true,
   });
 
   const server = createMcpServer(context);

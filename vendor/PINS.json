@@ -13,11 +13,11 @@
     {
       "name": "StormLib",
       "repo": "https://github.com/ladislav-zezula/StormLib",
-      "ref": "master",
-      "branchAtPinTime": "master",
-      "pinnedOn": null,
+      "ref": "6bb1882bd00ddbc3729cac5dac0fda81a61e5514",
+      "branchAtPinTime": "v9.40",
+      "pinnedOn": "2026-08-17",
       "destination": "native/sc2mpq/third_party/StormLib",
-      "why": "MPQ read/write for the sc2mpq sidecar. PIN A COMMIT before Phase 3 is declared complete -- 'master' here is a placeholder recorded honestly rather than a fake hash."
+      "why": "MPQ read/write for the sc2mpq sidecar. Pinned to the v9.40 release tag rather than master: a repack that corrupts a map is the worst failure this project can have, so the archive library must not move under us."
     }
   ]
 }

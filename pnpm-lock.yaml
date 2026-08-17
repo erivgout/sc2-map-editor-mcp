@@ -14,6 +14,9 @@ importers:
       '@modelcontextprotocol/client':
         specifier: ^2.0.0
         version: 2.0.0
+      '@sc2mcp/core':
+        specifier: workspace:*
+        version: link:packages/sc2-core
       '@sc2mcp/test-utils':
         specifier: workspace:*
         version: link:packages/sc2-test-utils

@@ -8,14 +8,17 @@
  */
 
 import {
+  MpqHelper,
   PathGuard,
   WorkspaceService,
   WorkspaceStore,
   createLogger,
+  createMpqExtractor,
   deriveCapabilities,
   detectInstallations,
   queryRegistryInstallPaths,
   selectInstallation,
+  type HelperProbe,
   type Logger,
   type Sc2Installation,
   type ServerCapabilities,
@@ -33,6 +36,8 @@ export interface ServerContext {
   readonly installations: readonly Sc2Installation[];
   /** The unambiguous installation, or `null` when absent or ambiguous. */
   readonly selectedInstallation: Sc2Installation | null;
+  /** Result of the startup probe for the `sc2mpq` sidecar, including why it is absent. */
+  readonly mpqHelper: HelperProbe;
   readonly capabilities: ServerCapabilities;
 }
 
@@ -45,6 +50,11 @@ export interface CreateContextOptions {
    * spawn `reg.exe` nor depend on whether the dev machine has SC2 installed.
    */
   readonly skipInstallationDetection?: boolean;
+  /**
+   * Skip the `sc2mpq` probe. Tests set this so their expectations do not flip depending
+   * on whether the developer happens to have built the native helper.
+   */
+  readonly skipMpqHelperProbe?: boolean;
 }
 
 export async function createContext(options: CreateContextOptions): Promise<ServerContext> {
@@ -53,7 +63,34 @@ export async function createContext(options: CreateContextOptions): Promise<Serv
 
   const pathGuard = new PathGuard({ allowedRoots: config.allowedRoots });
   const store = new WorkspaceStore({ workspaceRoot: config.workspaceRoot, serverVersion: SERVER_VERSION });
-  const workspaces = new WorkspaceService({ config, pathGuard, store, logger });
+
+  const mpqHelper: HelperProbe =
+    options.skipMpqHelperProbe === true
+      ? { available: false, reason: 'The MPQ helper probe was skipped for this context.', searched: [] }
+      : await MpqHelper.probe({ helperPath: config.mpqHelperPath, timeoutMs: config.processTimeoutMs });
+
+  if (mpqHelper.available) {
+    logger.info('sc2mpq helper available', {
+      path: mpqHelper.executablePath,
+      version: mpqHelper.version.version,
+      stormLib: mpqHelper.version.stormLib,
+    });
+  } else {
+    // Not an error: the helper needs a C++ toolchain most users will not have. The
+    // consequence — packed archives cannot be opened — is reported through the
+    // capability matrix instead.
+    logger.info('sc2mpq helper unavailable', { reason: mpqHelper.reason, searched: mpqHelper.searched });
+  }
+
+  const workspaces = new WorkspaceService({
+    config,
+    pathGuard,
+    store,
+    logger,
+    mpqExtractor: mpqHelper.available
+      ? createMpqExtractor(MpqHelper.fromProbe(mpqHelper, config.processTimeoutMs))
+      : undefined,
+  });
 
   let installations: Sc2Installation[] = [];
   if (options.skipInstallationDetection !== true) {
@@ -65,8 +102,7 @@ export async function createContext(options: CreateContextOptions): Promise<Serv
   const selectedInstallation = selectInstallation(installations);
 
   const capabilities = deriveCapabilities({
-    // Phase 3 has not landed; there is no sidecar to probe yet.
-    mpqHelperAvailable: false,
+    mpqHelperAvailable: mpqHelper.available,
     editorAvailable: selectedInstallation?.editorPath != null,
     // Phase 5 has not landed; the toolkit adapter does not exist yet.
     toolkitAvailable: false,
@@ -86,5 +122,5 @@ export async function createContext(options: CreateContextOptions): Promise<Serv
     selectedInstallation: selectedInstallation?.path ?? null,
   });
 
-  return { config, logger, pathGuard, workspaces, installations, selectedInstallation, capabilities };
+  return { config, logger, pathGuard, workspaces, installations, selectedInstallation, mpqHelper, capabilities };
 }

@@ -15,7 +15,7 @@ answer for a running build. As of now:
 | Subsystem | Read | Write | Notes |
 |---|---|---|---|
 | Workspace staging | ✅ | ✅ | Unpacked document directories only |
-| MPQ archives (`.SC2Map`, `.SC2Mod`) | ❌ | ❌ | Needs the `sc2mpq` sidecar (Phase 3) |
+| MPQ archives (`.SC2Map`, `.SC2Mod`) | ⚠️ | ❌ | Code complete but **never compiled** — see [docs/native-helper.md](docs/native-helper.md) |
 | GameData catalogs | ❌ | ❌ | Phase 5–6 |
 | Galaxy scripts | ❌ | ❌ | Phase 5, 9 |
 | Triggers | ❌ | ❌ | Phase 11 |
@@ -27,6 +27,11 @@ answer for a running build. As of now:
 
 Raw text search and file reading work on any staged document, so the server is already
 useful for inspecting an unpacked map — just not for understanding it semantically.
+
+⚠️ The `sc2mpq` helper that reads packed archives is written and wired in, but building it
+needs a C++ toolchain plus the Windows SDK, which was unavailable on the machine this was
+developed on. Until it is compiled and round-trip tested, `sc2_open_document` refuses
+packed archives with a clear error, and `capabilities.mpq` reports `false`.
 
 ### Tools
 
@@ -110,12 +115,14 @@ The server speaks MCP over stdio. Point your client at the built entry point:
 ## Repository layout
 
 ```text
-apps/sc2-mcp-server/    MCP protocol layer: tools, schemas, error translation, stdio entry
-packages/sc2-core/      Domain layer: config, path guard, workspace staging, process runner
+apps/sc2-mcp-server/     MCP protocol layer: tools, schemas, error translation, stdio entry
+packages/sc2-core/       Domain layer: config, path guard, workspace staging, MPQ adapter
 packages/sc2-test-utils/ Test fixtures and temp-directory helpers
-docs/adr/               Architecture decision records
-vendor/PINS.json        Pinned upstream sources (checkouts are gitignored)
-tests/                  Cross-package integration tests
+native/sc2mpq/           C++ MPQ sidecar (StormLib), built separately
+docs/adr/                Architecture decision records
+vendor/PINS.json         Pinned upstream sources (checkouts are gitignored)
+scripts/                 bootstrap.ps1 (fetch pins), build-native.ps1 (build the sidecar)
+tests/                   Cross-package integration tests
 ```
 
 The layering rule (PLAN.md §4): tool handlers validate input, call a domain service, and

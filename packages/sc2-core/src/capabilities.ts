@@ -56,8 +56,13 @@ export const NO_CAPABILITIES: ServerCapabilities = Object.freeze({
 export const IMPLEMENTED: ServerCapabilities = Object.freeze({
   // Phase 2: staging, path guard, open/summary/discard for directory sources.
   workspace: { read: true, write: true },
-  // Phase 3: not started — the sc2mpq sidecar does not exist yet.
-  mpq: { read: false, write: false },
+  // Phase 3. Read is wired end to end and gated at runtime on the sidecar being present.
+  //
+  // Write stays false even though `sc2mpq pack` exists: PLAN.md §10 requires that
+  // multiple editor-authored maps survive extract/repack and still load in the Galaxy
+  // Editor before repacking may be advertised. That corpus does not exist yet, and a
+  // repack that corrupts someone's map is the worst failure this project can produce.
+  mpq: { read: true, write: false },
   // Phases 5-6.
   gamedata: { read: false, write: false, inheritance: false },
   // Phases 5, 9.

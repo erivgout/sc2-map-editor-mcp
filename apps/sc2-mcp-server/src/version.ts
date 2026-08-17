@@ -12,12 +12,10 @@ export const MCP_PROTOCOL_TARGET = '2026-07-28';
 /** Bumped whenever the persisted workspace layout changes (PLAN.md §40). */
 export const WORKSPACE_STATE_SCHEMA_VERSION = 1;
 
-/**
- * Version of the `sc2mpq` sidecar CLI contract. The helper must report a matching
- * value or the adapter refuses to use it — a silently-mismatched sidecar is how a
- * repack corrupts a map.
- */
-export const MPQ_HELPER_PROTOCOL_VERSION = 1;
+// The sidecar protocol version lives with the adapter that enforces it
+// (`@sc2mcp/core`'s archive/protocol.ts), so there is one definition to keep in step
+// with native/sc2mpq/CMakeLists.txt rather than two.
+export { MPQ_HELPER_PROTOCOL_VERSION } from '@sc2mcp/core';
 
 function readOwnVersion(): string {
   // Resolves identically from `src/` (tests) and `dist/` (build): both sit one level

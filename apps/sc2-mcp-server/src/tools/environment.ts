@@ -89,7 +89,16 @@ function limitationsFor(context: ServerContext): string[] {
   const notes: string[] = [];
   const { capabilities } = context;
   if (!capabilities.mpq.read) {
-    notes.push('Packed .SC2Map/.SC2Mod archives cannot be opened; only unpacked document directories are supported.');
+    notes.push(
+      `Packed .SC2Map/.SC2Mod archives cannot be opened; only unpacked document directories are supported. ${
+        context.mpqHelper.available ? '' : context.mpqHelper.reason
+      }`.trim(),
+    );
+  }
+  if (capabilities.mpq.read && !capabilities.mpq.write) {
+    notes.push(
+      'Packed archives can be read but not written: repacking is not advertised until multiple editor-authored maps have survived an extract/repack/reopen round trip.',
+    );
   }
   if (!capabilities.gamedata.read) {
     notes.push('GameData catalogs are not parsed yet; there are no catalog search or edit tools.');
@@ -128,7 +137,7 @@ export function registerEnvironmentTools(server: McpServer, context: ServerConte
           workspaceStateSchema: WORKSPACE_STATE_SCHEMA_VERSION,
           mpqHelperProtocol: MPQ_HELPER_PROTOCOL_VERSION,
           galaxyToolkitCommit: null,
-          mpqHelperVersion: null,
+          mpqHelperVersion: context.mpqHelper.available ? context.mpqHelper.version.version : null,
           node: process.versions.node,
         },
         configuration: {
