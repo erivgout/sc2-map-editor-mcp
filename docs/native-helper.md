@@ -83,9 +83,14 @@ Every member of every map came back byte-identical.
 
 ### Opened in the editor
 
-PLAN.md section 10's last validation step is done. A map was authored end to end through
-this server - 119 new catalog objects, 178 localized strings, an authored Galaxy library -
-committed as a packed `.SC2Map`, and opened in the Galaxy Editor.
+PLAN.md section 10's last validation step is done. An existing user-made map was opened
+from a packed `.SC2Map`, extended through this server - 119 new catalog objects, 178
+localized strings, one authored Galaxy library - repacked, and opened in the Galaxy Editor.
+
+The map itself was not created here; nothing in this build can create a document. Its
+terrain, regions, placed objects and triggers are the original author's and were never
+touched, because this build cannot write any of them. What was added is data and a script
+that the map does not execute.
 
 The editor loaded it and wrote `XMLAlerts.txt` naming the authored objects and fields it
 objected to, by id. Those were real data errors (`DamageDealtScaled` is indexed by damage

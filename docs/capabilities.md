@@ -41,11 +41,11 @@ extract, repack, verify, and re-extract byte-identically, and the full
 open -> edit -> commit -> reopen cycle passes on a real packed map.
 
 PLAN.md section 10's last validation step - opening a repacked map in the Galaxy Editor -
-has now been done. A map was authored through this server, packed, and opened in the editor,
-which loaded it and reported catalog errors against the authored objects by name; after
-those were fixed the same map reopened with no alerts at all. That is the editor reading
-this build's output as a real document, which is the evidence the gate was waiting for.
-See [native-helper.md](native-helper.md).
+has now been done. An existing user-made map was opened, extended through this server,
+repacked, and opened in the editor, which loaded it and reported catalog errors against the
+added objects by name; after those were fixed the same map reopened with no alerts at all.
+That is the editor reading this build's output as a real document, which is the evidence
+the gate was waiting for. See [native-helper.md](native-helper.md).
 
 **Galaxy type checking.** The vendored `sc2-galaxy-lang` ships a `TypeChecker`, and it is
 deliberately unused. A useful one needs the game's native declarations — `natives.galaxy`

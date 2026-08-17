@@ -30,9 +30,9 @@ answer for a running build. As of now:
 Why the gaps are where they are, and what "⚠️" means in each row:
 [docs/capabilities.md](docs/capabilities.md).
 
-Packed archives work end to end: a map authored through this server, packed here, and
-opened in the Galaxy Editor loads as a real document, with the editor resolving the
-authored catalogs by name. Building the helper needs a C++ toolchain and the Windows SDK
+Packed archives work end to end: an existing map opened from a `.SC2Map`, extended here,
+repacked here, and opened in the Galaxy Editor loads as a real document, with the editor
+resolving the added catalogs by name. Building the helper needs a C++ toolchain and the Windows SDK
 (`scripts/build-native.ps1`); without it `capabilities.mpq` reports `false` and packed
 archives are refused with a clear error.
 
