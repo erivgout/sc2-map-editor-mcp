@@ -16,6 +16,7 @@ import { registerChangeTools } from './tools/changes.js';
 import { registerComponentTools } from './tools/components.js';
 import { registerEditorTools } from './tools/editor.js';
 import { registerEnvironmentTools } from './tools/environment.js';
+import { registerGalaxyTools } from './tools/galaxy.js';
 import { registerTextTools } from './tools/text.js';
 import { registerValidationTools } from './tools/validation.js';
 import { registerWorkspaceTools } from './tools/workspace.js';
@@ -48,6 +49,7 @@ export function createMcpServer(context: ServerContext): McpServer {
   registerValidationTools(server, context);
   registerEditorTools(server, context);
   registerAuthoringTools(server, context);
+  registerGalaxyTools(server, context);
 
   return server;
 }

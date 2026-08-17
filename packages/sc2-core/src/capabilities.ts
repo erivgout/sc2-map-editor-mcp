@@ -70,8 +70,10 @@ export const IMPLEMENTED: ServerCapabilities = Object.freeze({
   // only and offers neither field values nor inheritance. Spans are also what Phase 8's
   // in-place mutations need. See docs/adr/0002-own-catalog-layer.md.
   gamedata: { read: true, write: true, inheritance: true },
-  // Phases 5, 9.
-  galaxy: { read: false, write: false, typecheck: false },
+  // Phase 9, through the vendored sc2-galaxy-lang parser. Read and targeted text
+  // patching work; `typecheck` stays false because a real checker needs the game's
+  // native declarations, which are not in a map — see packages/sc2-core/src/galaxy.
+  galaxy: { read: true, write: true, typecheck: false },
   // Phases 5, 11.
   triggers: { read: false, write: false },
   // Phase 10. Text tables are line-oriented and reference nothing, so they are the

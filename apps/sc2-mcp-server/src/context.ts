@@ -15,6 +15,7 @@ import {
   createLogger,
   createMpqExtractor,
   deriveCapabilities,
+  probeGalaxyToolkit,
   detectInstallations,
   queryRegistryInstallPaths,
   selectInstallation,
@@ -55,6 +56,11 @@ export interface CreateContextOptions {
    * on whether the developer happens to have built the native helper.
    */
   readonly skipMpqHelperProbe?: boolean;
+  /**
+   * Skip the Galaxy toolkit probe. Tests set this so their capability expectations do
+   * not flip depending on whether the vendored toolkit happens to be built locally.
+   */
+  readonly skipGalaxyToolkitProbe?: boolean;
 }
 
 export async function createContext(options: CreateContextOptions): Promise<ServerContext> {
@@ -101,11 +107,20 @@ export async function createContext(options: CreateContextOptions): Promise<Serv
   }
   const selectedInstallation = selectInstallation(installations);
 
+  const toolkit =
+    options.skipGalaxyToolkitProbe === true
+      ? { available: false, reason: 'The Galaxy toolkit probe was skipped for this context.' }
+      : await probeGalaxyToolkit();
+  if (!toolkit.available) {
+    // Expected on a fresh clone: the toolkit is vendored, gitignored, and separately
+    // built. Galaxy capabilities report false rather than the server failing to start.
+    logger.info('galaxy toolkit unavailable', { reason: toolkit.reason });
+  }
+
   const capabilities = deriveCapabilities({
     mpqHelperAvailable: mpqHelper.available,
     editorAvailable: selectedInstallation?.editorPath != null,
-    // Phase 5 has not landed; the toolkit adapter does not exist yet.
-    toolkitAvailable: false,
+    toolkitAvailable: toolkit.available,
   });
 
   if (config.allowedRoots.length === 0) {

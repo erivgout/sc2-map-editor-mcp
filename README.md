@@ -18,7 +18,7 @@ answer for a running build. As of now:
 | Component inventory | ✅ | ❌ | `ComponentList`, `DocumentInfo`, dependencies — verified against real editor output |
 | GameData catalogs | ✅ | ✅ | Search, inspect, resolve inheritance, find references, patch/clone/create/delete. Own document only — dependencies are not loaded |
 | MPQ archives (`.SC2Map`, `.SC2Mod`) | ⚠️ | ❌ | Code complete but **never compiled** — see [docs/native-helper.md](docs/native-helper.md) |
-| Galaxy scripts | ❌ | ❌ | Phase 5, 9 |
+| Galaxy scripts | ✅ | ✅ | Parse, symbols, syntax diagnostics, safe text patching. **No type checking** — needs the game's natives. Requires the vendored toolkit to be built |
 | Triggers | ❌ | ❌ | Phase 11 |
 | Localization | ✅ | ✅ | Text tables, preserving BOM and CRLF exactly |
 | SC2Layout | ❌ | ❌ | Phase 10 |
@@ -66,6 +66,12 @@ packed archives with a clear error, and `capabilities.mpq` reports `false`.
 | `sc2_launch_editor` | no | Open a document in the Galaxy Editor to confirm it loads |
 | `sc2_get_editor_logs` | yes | List or read the editor's own logs |
 | `sc2_get_user_maps` | yes | The user's Maps folder, resolved through the registry |
+| `sc2_list_galaxy_files` | yes | Scripts in the document; flags the generated MapScript |
+| `sc2_get_galaxy_file` | yes | Read a script, optionally by line range |
+| `sc2_get_galaxy_symbols` | yes | Functions, variables, structs, includes |
+| `sc2_get_galaxy_diagnostics` | yes | Syntax errors with line and column |
+| `sc2_apply_galaxy_patch` | no | Exact-text edit, refused if it breaks the parse |
+| `sc2_create_galaxy_file` | no | Add a library, syntax-checked first |
 | `sc2_create_unit_from_template` | no | Clone a unit with a name, stats, and its own weapon |
 | `sc2_set_unit_weapon_damage` | no | Change one unit's damage without touching units that share it |
 | `sc2_isolate_shared_object` | no | Give one owner its own copy of something shared |

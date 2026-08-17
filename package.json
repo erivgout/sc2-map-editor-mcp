@@ -19,6 +19,7 @@
   },
   "devDependencies": {
     "@modelcontextprotocol/client": "^2.0.0",
+    "@modelcontextprotocol/server": "^2.0.0",
     "@sc2mcp/core": "workspace:*",
     "@sc2mcp/test-utils": "workspace:*",
     "@eslint/js": "^10.0.1",

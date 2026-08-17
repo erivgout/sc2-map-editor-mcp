@@ -14,6 +14,7 @@ export * from './config.js';
 export * from './editor/index.js';
 export * from './errors.js';
 export * from './fs/index.js';
+export * from './galaxy/index.js';
 export * from './gamedata/index.js';
 export * from './install/index.js';
 export * from './logging.js';

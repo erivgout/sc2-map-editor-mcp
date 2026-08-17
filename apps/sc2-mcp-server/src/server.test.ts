@@ -63,6 +63,7 @@ async function createHarness(): Promise<Harness> {
     // whether the developer happened to have built the native helper.
     skipInstallationDetection: true,
     skipMpqHelperProbe: true,
+    skipGalaxyToolkitProbe: true,
   });
 
   const server = createMcpServer(context);
@@ -99,11 +100,13 @@ describe('MCP server', () => {
     const names = tools.map((tool) => tool.name).sort();
 
     expect(names).toEqual([
+      'sc2_apply_galaxy_patch',
       'sc2_check_shared_object',
       'sc2_clone_catalog_object',
       'sc2_commit_document',
       'sc2_copy_text_key',
       'sc2_create_catalog_object',
+      'sc2_create_galaxy_file',
       'sc2_create_snapshot',
       'sc2_create_unit_from_template',
       'sc2_delete_catalog_object',
@@ -119,6 +122,9 @@ describe('MCP server', () => {
       'sc2_get_document_info',
       'sc2_get_document_summary',
       'sc2_get_editor_logs',
+      'sc2_get_galaxy_diagnostics',
+      'sc2_get_galaxy_file',
+      'sc2_get_galaxy_symbols',
       'sc2_get_server_info',
       'sc2_get_text_value',
       'sc2_get_user_maps',
@@ -128,6 +134,7 @@ describe('MCP server', () => {
       'sc2_list_component_types',
       'sc2_list_components',
       'sc2_list_files',
+      'sc2_list_galaxy_files',
       'sc2_list_locales',
       'sc2_list_snapshots',
       'sc2_list_workspaces',
@@ -183,6 +190,8 @@ describe('MCP server', () => {
     expect(capabilities['mpq']).toEqual({ read: false, write: false });
     expect(capabilities['terrain']).toEqual({ read: false, write: false });
     expect(capabilities['localization']).toEqual({ read: true, write: true });
+    // Galaxy is implemented but gated on the vendored toolkit, which this harness skips.
+    expect(capabilities['galaxy']).toEqual({ read: false, write: false, typecheck: false });
 
     expect(outcome.structured['limitations']).toEqual(expect.arrayContaining([expect.stringContaining('Packed')]));
   });
