@@ -19,7 +19,7 @@ answer for a running build. As of now:
 | GameData catalogs | ✅ | ✅ | Search, inspect, resolve inheritance, find references, patch/clone/create/delete. Own document only — dependencies are not loaded |
 | MPQ archives (`.SC2Map`, `.SC2Mod`) | ⚠️ | ❌ | Code complete but **never compiled** — see [docs/native-helper.md](docs/native-helper.md) |
 | Galaxy scripts | ✅ | ✅ | Parse, symbols, syntax diagnostics, safe text patching. **No type checking** — needs the game's natives. Requires the vendored toolkit to be built |
-| Triggers | ❌ | ❌ | Phase 11 |
+| Triggers | ✅ | ⚠️ | Structure, names, search. Renaming only — structural editing deliberately not implemented |
 | Localization | ✅ | ✅ | Text tables, preserving BOM and CRLF exactly |
 | SC2Layout | ❌ | ❌ | Phase 10 |
 | Placed objects / regions | ❌ | ❌ | Phase 15 |
@@ -72,6 +72,10 @@ packed archives with a clear error, and `capabilities.mpq` reports `false`.
 | `sc2_get_galaxy_diagnostics` | yes | Syntax errors with line and column |
 | `sc2_apply_galaxy_patch` | no | Exact-text edit, refused if it breaks the parse |
 | `sc2_create_galaxy_file` | no | Add a library, syntax-checked first |
+| `sc2_list_triggers` | yes | The trigger tree with names resolved |
+| `sc2_get_trigger` | yes | One element: type, name, contents, referrers, raw XML |
+| `sc2_search_triggers` | yes | Find trigger elements by name |
+| `sc2_rename_trigger` | no | Rename an element (edits TriggerStrings only) |
 | `sc2_create_unit_from_template` | no | Clone a unit with a name, stats, and its own weapon |
 | `sc2_set_unit_weapon_damage` | no | Change one unit's damage without touching units that share it |
 | `sc2_isolate_shared_object` | no | Give one owner its own copy of something shared |

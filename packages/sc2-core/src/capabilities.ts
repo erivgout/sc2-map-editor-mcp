@@ -74,8 +74,11 @@ export const IMPLEMENTED: ServerCapabilities = Object.freeze({
   // patching work; `typecheck` stays false because a real checker needs the game's
   // native declarations, which are not in a map — see packages/sc2-core/src/galaxy.
   galaxy: { read: true, write: true, typecheck: false },
-  // Phases 5, 11.
-  triggers: { read: false, write: false },
+  // Phase 11. Read-only structure, plus renaming — which edits TriggerStrings.txt, not
+  // the trigger data, so it cannot corrupt the trigger graph. Structural trigger editing
+  // stays unimplemented: PLAN.md §21 warns against generating trigger XML by guessing
+  // undocumented ids, and nothing here does.
+  triggers: { read: true, write: false },
   // Phase 10. Text tables are line-oriented and reference nothing, so they are the
   // lowest-risk writable component in the document.
   localization: { read: true, write: true },
@@ -123,10 +126,9 @@ export function deriveCapabilities(inputs: CapabilityInputs): ServerCapabilities
       write: IMPLEMENTED.galaxy.write && toolkitAvailable,
       typecheck: IMPLEMENTED.galaxy.typecheck && toolkitAvailable,
     },
-    triggers: {
-      read: IMPLEMENTED.triggers.read && toolkitAvailable,
-      write: IMPLEMENTED.triggers.write && toolkitAvailable,
-    },
+    // Not gated on the toolkit: trigger data turned out to be plain XML, so this repo's
+    // own parser handles it.
+    triggers: { ...IMPLEMENTED.triggers },
     localization: { ...IMPLEMENTED.localization },
     layout: {
       read: IMPLEMENTED.layout.read && toolkitAvailable,

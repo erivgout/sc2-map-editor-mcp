@@ -18,6 +18,7 @@ import { registerEditorTools } from './tools/editor.js';
 import { registerEnvironmentTools } from './tools/environment.js';
 import { registerGalaxyTools } from './tools/galaxy.js';
 import { registerTextTools } from './tools/text.js';
+import { registerTriggerTools } from './tools/triggers.js';
 import { registerValidationTools } from './tools/validation.js';
 import { registerWorkspaceTools } from './tools/workspace.js';
 import { SERVER_NAME, SERVER_VERSION } from './version.js';
@@ -50,6 +51,7 @@ export function createMcpServer(context: ServerContext): McpServer {
   registerEditorTools(server, context);
   registerAuthoringTools(server, context);
   registerGalaxyTools(server, context);
+  registerTriggerTools(server, context);
 
   return server;
 }

@@ -25,8 +25,11 @@ import {
   findSc2DocumentsFolder,
   listEditorLogs,
   parseCatalogFile,
+  buildTriggerTree,
   parseComponentList,
   parseDocumentInfo,
+  parseTextTable,
+  parseTriggerData,
   parseXml,
   selectInstallation,
   walkFiles,
@@ -179,6 +182,33 @@ describe.skipIf(mapPath === null)('real editor-produced document', () => {
     }
     // Crash reports are directories, and must be reported as such rather than read.
     expect(logs.every((log) => typeof log.isDirectory === 'boolean')).toBe(true);
+  });
+
+  it('parses the shipped 1 MB Triggers component and joins its names', async () => {
+    const source = await readFile(path.join(documentPath, 'Triggers'), 'utf8');
+    expect(source.length).toBeGreaterThan(500_000);
+
+    const data = parseTriggerData(source);
+    expect(data.elements.size).toBeGreaterThan(100);
+    expect(data.rootIds.length).toBeGreaterThan(0);
+
+    // The element types observed in real editor output.
+    const types = [...data.countsByType.keys()];
+    expect(types).toEqual(expect.arrayContaining(['Category', 'Trigger', 'Variable', 'FunctionCall']));
+
+    // Every `<Item>` should name an element that exists; a dangling id is an authoring
+    // defect worth surfacing, and the shipped map should not have one.
+    expect(data.danglingIds).toEqual([]);
+
+    // Names live in TriggerStrings, not in the trigger data. Joining them is what makes
+    // the tree readable at all.
+    const strings = await readFile(path.join(documentPath, 'enUS.SC2Data', 'LocalizedData', 'TriggerStrings.txt'), 'utf8');
+    const table = parseTextTable(strings, 'TriggerStrings.txt');
+    const names = new Map([...table.byKey].map(([key, entry]) => [key, entry.value]));
+
+    const tree = buildTriggerTree(data, { names, maxDepth: 2 });
+    expect(tree.length).toBe(data.rootIds.length);
+    expect(tree.some((node) => node.name !== null), 'no root element resolved to a name').toBe(true);
   });
 
   it('locates the installation and reports the current build', async () => {
