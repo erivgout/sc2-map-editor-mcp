@@ -24,7 +24,7 @@ answer for a running build. As of now:
 | SC2Layout | ❌ | ❌ | Phase 10 |
 | Placed objects / regions | ❌ | ❌ | Phase 15 |
 | Terrain | ❌ | ❌ | Phase 16 |
-| Editor launch / test | ❌ | ❌ | Phase 13 (installation *detection* works) |
+| Editor launch | ✅ | n/a | Opens a document in the Galaxy Editor; reads its logs. Automatic **test-map launching is not provided** — no reliable mechanism verified |
 
 Raw text search and file reading work on any staged document, so the server is already
 useful for inspecting an unpacked map — just not for understanding it semantically.
@@ -63,6 +63,9 @@ packed archives with a clear error, and `capabilities.mpq` reports `false`.
 | `sc2_delete_text_key` | no | Remove localized strings |
 | `sc2_copy_text_key` | no | Copy strings between keys or locales |
 | `sc2_find_missing_localization` | yes | Catalog objects with no display name |
+| `sc2_launch_editor` | no | Open a document in the Galaxy Editor to confirm it loads |
+| `sc2_get_editor_logs` | yes | List or read the editor's own logs |
+| `sc2_get_user_maps` | yes | The user's Maps folder, resolved through the registry |
 | `sc2_validate_document` | yes | Every check this build has, per category, with unchecked ones named |
 | `sc2_commit_document` | no | Write the staged document out, with backup and preflight |
 | `sc2_diff_workspace` | yes | Unified diff against the source, or against a snapshot |

@@ -82,8 +82,9 @@ export const IMPLEMENTED: ServerCapabilities = Object.freeze({
   objects: { read: false, write: false },
   // Phase 16.
   terrain: { read: false, write: false },
-  // Phase 13.
-  editorLaunch: false,
+  // Phase 13. Opening a document in the editor works; automatic test-map launching does
+  // not exist, because no reliable mechanism for it has been verified (PLAN.md §29).
+  editorLaunch: true,
   // Phase 13 / PLAN.md §30.
   runtimeSmokeTest: false,
 });

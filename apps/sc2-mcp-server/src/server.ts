@@ -13,6 +13,7 @@ import { registerCatalogTools } from './tools/catalog.js';
 import { registerCatalogMutationTools } from './tools/catalogMutation.js';
 import { registerChangeTools } from './tools/changes.js';
 import { registerComponentTools } from './tools/components.js';
+import { registerEditorTools } from './tools/editor.js';
 import { registerEnvironmentTools } from './tools/environment.js';
 import { registerTextTools } from './tools/text.js';
 import { registerValidationTools } from './tools/validation.js';
@@ -44,6 +45,7 @@ export function createMcpServer(context: ServerContext): McpServer {
   registerChangeTools(server, context);
   registerTextTools(server, context);
   registerValidationTools(server, context);
+  registerEditorTools(server, context);
 
   return server;
 }

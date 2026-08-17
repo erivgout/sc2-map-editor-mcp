@@ -22,6 +22,8 @@ import {
   createNullLogger,
   detectInstallations,
   diffText,
+  findSc2DocumentsFolder,
+  listEditorLogs,
   parseCatalogFile,
   parseComponentList,
   parseDocumentInfo,
@@ -147,6 +149,36 @@ describe.skipIf(mapPath === null)('real editor-produced document', () => {
     expect(reparsed.entries).toHaveLength(file.entries.length);
     const reparsedTarget = reparsed.entries.find((entry) => entry.id === target.id);
     expect(reparsedTarget?.fields.find((field) => field.name === 'LifeMax')?.value).toBe('123456');
+  });
+
+  it('resolves the real Documents folder through the registry, not %USERPROFILE%', async () => {
+    // ADR 0001: OneDrive Known Folder Move relocates Documents, so the obvious
+    // USERPROFILE\Documents path is wrong and empty. This is the check that catches a
+    // regression back to the naive join.
+    const documents = await findSc2DocumentsFolder();
+    expect(documents).not.toBeNull();
+    if (documents === null) return;
+
+    expect(documents.root.endsWith(path.join('StarCraft II'))).toBe(true);
+    expect(existsSync(documents.root)).toBe(true);
+  });
+
+  it('lists and classifies the editor\'s own logs', async () => {
+    const documents = await findSc2DocumentsFolder();
+    if (documents === null || !existsSync(documents.editorLogs)) return;
+
+    const logs = await listEditorLogs(documents.editorLogs, 10);
+    // A fresh installation may have none; only assert the shape when there are some.
+    if (logs.length === 0) return;
+
+    expect(logs[0]?.name).toBeTruthy();
+    expect(logs[0]?.kind).toBeTruthy();
+    // Newest first.
+    for (let index = 1; index < logs.length; index += 1) {
+      expect(logs[index - 1]!.modifiedAt >= logs[index]!.modifiedAt).toBe(true);
+    }
+    // Crash reports are directories, and must be reported as such rather than read.
+    expect(logs.every((log) => typeof log.isDirectory === 'boolean')).toBe(true);
   });
 
   it('locates the installation and reports the current build', async () => {

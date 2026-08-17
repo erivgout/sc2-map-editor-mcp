@@ -10,6 +10,7 @@ export * from './capabilities.js';
 export * from './changes/index.js';
 export * from './components/index.js';
 export * from './config.js';
+export * from './editor/index.js';
 export * from './errors.js';
 export * from './fs/index.js';
 export * from './gamedata/index.js';
