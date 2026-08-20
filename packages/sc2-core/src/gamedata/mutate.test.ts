@@ -295,6 +295,26 @@ describe('createCatalogEntry', () => {
     expect(parseCatalogFile(outcome.content, PATH).entries).toHaveLength(3);
   });
 
+  it('writes escaped root attributes in deterministic order', () => {
+    const outcome = createCatalogEntry(CATALOG, 'CActorUnit', 'VanguardActor', PATH, {
+      parent: 'Marine',
+      attributes: { unitName: 'MCPHeroVanguard', alias: 'A&B' },
+    });
+
+    expect(outcome.content).toContain(
+      '<CActorUnit id="VanguardActor" parent="Marine" alias="A&amp;B" unitName="MCPHeroVanguard"/>',
+    );
+  });
+
+  it('refuses reserved or invalid root attributes', () => {
+    expect(() =>
+      createCatalogEntry(CATALOG, 'CActorUnit', 'BadActor', PATH, { attributes: { id: 'Override' } }),
+    ).toThrow(SC2Error);
+    expect(() =>
+      createCatalogEntry(CATALOG, 'CActorUnit', 'BadActor', PATH, { attributes: { 'not valid': 'x' } }),
+    ).toThrow(SC2Error);
+  });
+
   it('refuses a duplicate id', () => {
     expect(() => createCatalogEntry(CATALOG, 'CUnit', 'Marine', PATH)).toThrow(SC2Error);
   });

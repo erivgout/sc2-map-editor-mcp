@@ -42,12 +42,19 @@ real piece of work, not a flag to flip.
 
 ## `MapScript.galaxy` is generated
 
-The editor writes `MapScript.galaxy` from the trigger data on every save. Editing it
-accomplishes nothing — the next save overwrites it.
+The editor writes `MapScript.galaxy` from trigger data on save, so arbitrary text edits are
+not durable. Regular patch and create operations therefore refuse this path.
 
 `sc2_list_galaxy_files` flags it `generated`, `sc2_get_galaxy_diagnostics` skips it unless
 asked for by name, and `sc2_apply_galaxy_patch` refuses it outright with an error pointing
 at the triggers instead. Authored libraries live under `*.SC2Data/`.
+
+For script-only maps, `sc2_set_galaxy_entrypoint` is the bounded exception. It generates a
+deterministic `MapScript.galaxy` that loads `NativeLib`, includes exactly one authored
+library, and calls one validated initializer from `InitMap`. Both the library and generated
+entrypoint are parsed before the transaction is allowed. A later Galaxy Editor save may
+still regenerate the file, so callers should invoke the tool after authored libraries are
+finalized and before packing or testing.
 
 ## How patching stays safe
 

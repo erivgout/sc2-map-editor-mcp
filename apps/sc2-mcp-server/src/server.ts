@@ -19,6 +19,7 @@ import { registerEnvironmentTools } from './tools/environment.js';
 import { registerGalaxyTools } from './tools/galaxy.js';
 import { registerLayoutTools } from './tools/layout.js';
 import { registerMapDataTools } from './tools/mapdata.js';
+import { registerMapInfoTools } from './tools/mapInfo.js';
 import { registerTerrainTools } from './tools/terrain.js';
 import { registerTextTools } from './tools/text.js';
 import { registerTriggerTools } from './tools/triggers.js';
@@ -57,6 +58,7 @@ export function createMcpServer(context: ServerContext): McpServer {
   registerLayoutTools(server, context);
   registerTriggerTools(server, context);
   registerMapDataTools(server, context);
+  registerMapInfoTools(server, context);
   registerTerrainTools(server, context);
 
   return server;

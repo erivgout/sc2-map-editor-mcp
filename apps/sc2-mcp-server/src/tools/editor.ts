@@ -16,6 +16,7 @@ import {
   launchEditor,
   listEditorLogs,
   parseSc2AlertDiagnostics,
+  parseSc2ScriptErrorDiagnostics,
   readEditorLog,
   RUNTIME_TEST_MAP_NAME,
 } from '@sc2mcp/core';
@@ -192,7 +193,7 @@ export function registerEditorTools(server: McpServer, context: ServerContext): 
     {
       title: 'Get the last StarCraft II test status and logs',
       description:
-        'Returns the last runtime test process status, GameLogs created for that launch, the newest Alerts log, and parsed alert messages. Use this after sc2_test_document to distinguish a running client, a clean exit, and map/runtime diagnostics.',
+        'Returns the last runtime test process status, GameLogs created for that launch, the newest Alerts and ScriptError logs, and parsed diagnostics. Use this after sc2_test_document to distinguish a running client, a clean exit, compile failures, and runtime trigger errors.',
       inputSchema: z.object({}),
       outputSchema: z.object({
         run: z
@@ -222,6 +223,7 @@ export function registerEditorTools(server: McpServer, context: ServerContext): 
           z.object({ severity: z.enum(['error', 'warning', 'info']), channel: z.string(), message: z.string() }),
         ),
         alertsContent: z.string().nullable(),
+        scriptErrorContent: z.string().nullable(),
         note: z.string(),
       }),
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
@@ -236,6 +238,7 @@ export function registerEditorTools(server: McpServer, context: ServerContext): 
           logs: [],
           diagnostics: [],
           alertsContent: null,
+          scriptErrorContent: null,
           note,
         });
       }
@@ -255,13 +258,24 @@ export function registerEditorTools(server: McpServer, context: ServerContext): 
           break;
         }
       }
-      const diagnostics = alertsContent === null ? [] : parseSc2AlertDiagnostics(alertsContent);
+      let scriptErrorContent: string | null = null;
+      for (const scriptError of logs.filter((entry) => entry.kind.toLowerCase() === 'scripterror' && !entry.isDirectory)) {
+        const candidate = await readEditorLog(scriptError.path);
+        if (candidate.includes(RUNTIME_TEST_MAP_NAME)) {
+          scriptErrorContent = candidate;
+          break;
+        }
+      }
+      const diagnostics = [
+        ...(alertsContent === null ? [] : parseSc2AlertDiagnostics(alertsContent)),
+        ...(scriptErrorContent === null ? [] : parseSc2ScriptErrorDiagnostics(scriptErrorContent)),
+      ];
       const note =
         run.status === 'running'
           ? 'The StarCraft II test process is still running.'
-          : alertsContent === null
-            ? 'The StarCraft II test process exited. No Alerts log was found for this launch.'
-            : `The StarCraft II test process exited. Parsed ${diagnostics.length} alert message(s).`;
+          : alertsContent === null && scriptErrorContent === null
+            ? 'The StarCraft II test process exited. No Alerts or ScriptError log was found for this launch.'
+            : `The StarCraft II test process exited. Parsed ${diagnostics.length} diagnostic message(s).`;
 
       return ok(
         [
@@ -291,6 +305,7 @@ export function registerEditorTools(server: McpServer, context: ServerContext): 
           })),
           diagnostics,
           alertsContent,
+          scriptErrorContent,
           note,
         },
       );

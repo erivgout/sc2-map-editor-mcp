@@ -39,6 +39,24 @@ const TRIGGER_FIXTURE =
   '    </Element>\r\n' +
   '</TriggerData>\r\n';
 
+const MAP_INFO_FIXTURE = Buffer.from(
+  'SXBhTScAAAA2UwMAAAAAAAABAAAAAQAAAQAAAAEAAAAAAAEAAAAAAAAARGFyawBTaGFrdXJhcwAKAAAACAAAAPYAAADsAAAAAHgAAAAAAAAAAAAAAAAA/////wAAAAAAAAAAIAMAAFgCAAAAAAAAAABAAAABAAAAAgAAAAAgAAAAAAAAAAAAABAAAAAAAAAIAAAAAAMAAAAAAAAAAAAAAAAAAAAAAAAAAAABAQAAAP////8AAAAAAAAAAAAAAAAAAAIBAAAA/////wAAAAAAAAAAAAAAAAAAAwEAAAD/////AAAAAAAAAAAAAAAAAAAEAQAAAP////8AAAAAAAAAAAAAAAAAAAUBAAAA/////wAAAAAAAAAAAAAAAAAADgIAAAD/////WmVyZwAAAAAAfVMkOXBtb0MADwQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+  'base64',
+);
+
+const ATTRIBUTES_FIXTURE =
+  '<?xml version="1.0" encoding="utf-8"?>\r\n' +
+  '<Attributes>\r\n' +
+  '    <Attribute>\r\n' +
+  '        <Type Value="Player"/>\r\n' +
+  '        <Default><Slot Id="0"/><Value Id="1"/></Default>\r\n' +
+  '        <Default><Slot Id="1"/><Value Id="1"/></Default>\r\n' +
+  '        <Default><Slot Id="2"/><Value Id="1"/></Default>\r\n' +
+  '        <Default><Slot Id="3"/><Value Id="1"/></Default>\r\n' +
+  '        <Default><Slot Id="4"/><Value Id="1"/></Default>\r\n' +
+  '    </Attribute>\r\n' +
+  '</Attributes>\r\n';
+
 const TERRAIN_DESCRIPTOR =
   '<?xml version="1.0" encoding="utf-8"?>\r\n' +
   '<terrain version="115">\r\n' +
@@ -223,6 +241,7 @@ describe('MCP server', () => {
       'sc2_get_last_test_log',
       'sc2_get_layout',
       'sc2_get_layout_diagnostics',
+      'sc2_get_map_players',
       'sc2_get_server_info',
       'sc2_get_terrain_cell',
       'sc2_get_terrain_component',
@@ -262,6 +281,8 @@ describe('MCP server', () => {
       'sc2_search_text_keys',
       'sc2_search_triggers',
       'sc2_set_document_info',
+      'sc2_set_galaxy_entrypoint',
+      'sc2_set_map_player_slots',
       'sc2_set_terrain_cell_flags',
       'sc2_set_terrain_cliff',
       'sc2_set_terrain_height',
@@ -297,6 +318,8 @@ describe('MCP server', () => {
     expect(byName.get('sc2_add_component')?.annotations?.readOnlyHint).toBe(false);
     expect(byName.get('sc2_clone_trigger')?.annotations?.readOnlyHint).toBe(false);
     expect(byName.get('sc2_delete_trigger')?.annotations?.destructiveHint).toBe(true);
+    expect(byName.get('sc2_set_galaxy_entrypoint')?.annotations?.destructiveHint).toBe(true);
+    expect(byName.get('sc2_set_map_player_slots')?.annotations?.destructiveHint).toBe(true);
 
     // Restoring a snapshot discards every later change, so it is destructive; taking one
     // writes files but can never lose anything, so it is not.
@@ -311,6 +334,8 @@ describe('MCP server', () => {
     expect(outcome.isError).toBe(false);
     expect(outcome.structured['run']).toBeNull();
     expect(outcome.structured['logs']).toEqual([]);
+    expect(outcome.structured['alertsContent']).toBeNull();
+    expect(outcome.structured['scriptErrorContent']).toBeNull();
   });
 
   it('reports honest capabilities from sc2_get_server_info', async () => {
@@ -477,6 +502,37 @@ describe('MCP server', () => {
 
     const validation = await callTool(harness.client, 'sc2_validate_document', { workspace_id: workspaceId });
     expect((validation.structured['checks'] as Record<string, { status: string }>)['terrain']?.status).toBe('passed');
+  });
+
+  it('reads and synchronizes MapInfo and Attributes player slots through MCP', async () => {
+    await writeTree(harness.sourceDir, { MapInfo: MAP_INFO_FIXTURE, Attributes: ATTRIBUTES_FIXTURE });
+    const opened = await callTool(harness.client, 'sc2_open_document', { source_path: harness.sourceDir });
+    const workspaceId = (opened.structured['workspace'] as Record<string, unknown>)['id'] as string;
+
+    const before = await callTool(harness.client, 'sc2_get_map_players', { workspace_id: workspaceId });
+    expect((before.structured['players'] as unknown[])).toHaveLength(8);
+
+    const preview = await callTool(harness.client, 'sc2_set_map_player_slots', {
+      workspace_id: workspaceId,
+      max_players: 4,
+      remove_computer_players: true,
+    });
+    expect(preview.structured['dryRun']).toBe(true);
+    expect((await callTool(harness.client, 'sc2_get_map_players', { workspace_id: workspaceId })).structured['players']).toHaveLength(8);
+
+    const applied = await callTool(harness.client, 'sc2_set_map_player_slots', {
+      workspace_id: workspaceId,
+      max_players: 4,
+      remove_computer_players: true,
+      dry_run: false,
+    });
+    expect(applied.isError).toBe(false);
+    const after = await callTool(harness.client, 'sc2_get_map_players', { workspace_id: workspaceId });
+    expect((after.structured['players'] as { controller: number }[]).map((player) => player.controller)).toEqual([0, 1, 2, 3, 4, 15]);
+
+    const attributes = await callTool(harness.client, 'sc2_read_file', { workspace_id: workspaceId, path: 'Attributes' });
+    expect(attributes.structured['content']).toContain('<Slot Id="3"/>');
+    expect(attributes.structured['content']).not.toContain('<Slot Id="4"/>');
   });
 
   it('opens a document, inspects it, and discards it', async () => {
@@ -652,6 +708,27 @@ describe('MCP server', () => {
     expect(removed.isError).toBe(false);
     const listed = await callTool(harness.client, 'sc2_list_components', { workspace_id: workspaceId });
     expect((listed.structured['components'] as { typeCode: string }[]).some((entry) => entry.typeCode === 'test')).toBe(false);
+  });
+
+  it('sets a bounded Galaxy entrypoint through MCP', async () => {
+    const opened = await callTool(harness.client, 'sc2_open_document', { source_path: harness.sourceDir });
+    const workspaceId = (opened.structured['workspace'] as Record<string, unknown>)['id'] as string;
+
+    const applied = await callTool(harness.client, 'sc2_set_galaxy_entrypoint', {
+      workspace_id: workspaceId,
+      library_path: 'Base.SC2Data/LibTest.galaxy',
+      init_function: 'TestInit',
+      dry_run: false,
+    });
+    expect(applied.isError).toBe(false);
+
+    const mapScript = await callTool(harness.client, 'sc2_get_galaxy_file', {
+      workspace_id: workspaceId,
+      path: 'MapScript.galaxy',
+    });
+    expect(mapScript.structured['content']).toContain('include "Base.SC2Data/LibTest"');
+    expect(mapScript.structured['content']).toContain('    TestInit();');
+    expect(mapScript.structured['content']).not.toContain('InitTriggers');
   });
 
   it('clones and deletes complete trigger subgraphs through MCP', async () => {
@@ -1075,6 +1152,28 @@ describe('MCP server', () => {
       value: '2.25',
       definedBy: 'Unit/TestMarineBase',
     });
+  });
+
+  it('creates catalog objects with root attributes', async () => {
+    const opened = await callTool(harness.client, 'sc2_open_document', { source_path: harness.sourceDir });
+    const workspaceId = (opened.structured['workspace'] as Record<string, unknown>)['id'] as string;
+
+    await callTool(harness.client, 'sc2_create_catalog_object', {
+      workspace_id: workspaceId,
+      ctype: 'CActorUnit',
+      id: 'TestMarineActor',
+      parent: 'Marine',
+      attributes: { unitName: 'TestMarine' },
+      file: 'Base.SC2Data/GameData/ActorData.xml',
+      dry_run: false,
+    });
+
+    const actor = await callTool(harness.client, 'sc2_get_catalog_object', {
+      workspace_id: workspaceId,
+      domain: 'Actor',
+      id: 'TestMarineActor',
+    });
+    expect(actor.structured['rawXml']).toContain('unitName="TestMarine"');
   });
 
   it('refuses to delete a referenced object, listing what would break', async () => {

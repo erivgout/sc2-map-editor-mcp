@@ -13,6 +13,7 @@ import {
   RuntimeTestService,
   buildRuntimeTestArguments,
   parseSc2AlertDiagnostics,
+  parseSc2ScriptErrorDiagnostics,
   parseTasklistProcessIds,
   stageRuntimeTestDocument,
   type RuntimeTestDependencies,
@@ -132,6 +133,37 @@ describe('runtime test process protocol', () => {
     expect(parseSc2AlertDiagnostics(content)).toEqual([
       { severity: 'error', channel: 'USER', message: "Invalid preplaced unit: ''." },
       { severity: 'warning', channel: 'WARNING', message: 'Missing actor' },
+    ]);
+  });
+
+  it('extracts and deduplicates compile and trigger failures from a ScriptError log', () => {
+    const content =
+      'StarCraft II (B97563)\r\n' +
+      'Script compile error: Base.SC2Data/Lib.galaxy (165), Parameter type does not match\r\n' +
+      '         Script code: BadCall();\r\n' +
+      "Trigger Error in 'WaveLoop': Invalid ability id specified: 'attack3'\r\n" +
+      '   Near line 403 in SpawnEnemy() in Base.SC2Data/Lib.galaxy\r\n' +
+      "Trigger Error in 'WaveLoop': Invalid ability id specified: 'attack3'\r\n" +
+      '   Near line 403 in SpawnEnemy() in Base.SC2Data/Lib.galaxy\r\n' +
+      'Script load failed: Parameter type does not match the function definition\r\n';
+
+    expect(parseSc2ScriptErrorDiagnostics(content)).toEqual([
+      {
+        severity: 'error',
+        channel: 'SCRIPT',
+        message: 'Script compile error: Base.SC2Data/Lib.galaxy (165), Parameter type does not match',
+      },
+      {
+        severity: 'error',
+        channel: 'SCRIPT',
+        message:
+          "Trigger Error in 'WaveLoop': Invalid ability id specified: 'attack3' Near line 403 in SpawnEnemy() in Base.SC2Data/Lib.galaxy",
+      },
+      {
+        severity: 'error',
+        channel: 'SCRIPT',
+        message: 'Script load failed: Parameter type does not match the function definition',
+      },
     ]);
   });
 

@@ -11,14 +11,22 @@
  *    declarations, which live in the SC2 installation and not in a map; without them every
  *    call to a built-in would be flagged. A clean result here means the file parses, not
  *    that it compiles.
- *  - **`MapScript.galaxy` is generated.** The editor overwrites it from trigger data on
- *    every save, so editing it is pointless. It is listed and labelled, never hidden.
+ *  - **`MapScript.galaxy` is generated.** Arbitrary patch/create operations refuse it.
+ *    A separate bounded tool can generate one deterministic authored-library entrypoint.
  */
 
 import { readFile } from 'node:fs/promises';
 
 import type { McpServer } from '@modelcontextprotocol/server';
-import { GENERATED_MAP_SCRIPT, SC2Error, findGalaxyFiles, parseGalaxy, probeGalaxyToolkit, type ChangeResult } from '@sc2mcp/core';
+import {
+  GENERATED_MAP_SCRIPT,
+  SC2Error,
+  findGalaxyFiles,
+  parseGalaxy,
+  probeGalaxyToolkit,
+  renderGalaxyEntrypoint,
+  type ChangeResult,
+} from '@sc2mcp/core';
 import { z } from 'zod';
 
 import type { ServerContext } from '../context.js';
@@ -80,10 +88,8 @@ export function registerGalaxyTools(server: McpServer, context: ServerContext): 
   }
 
   /**
-   * MapScript.galaxy is regenerated from the trigger data, so anything written over it is
-   * lost the next time the editor saves — and the trigger logic it carried goes with it.
-   * Both write paths refuse it; they used to disagree, which left the file protected from
-   * patching but not from creation.
+   * MapScript.galaxy is regenerated from trigger data, so arbitrary writes are not durable.
+   * The generic write paths refuse it; sc2_set_galaxy_entrypoint is the bounded exception.
    */
   function refuseGeneratedScript(filePath: string): void {
     if (filePath.toLowerCase() !== GENERATED_MAP_SCRIPT) return;
@@ -130,7 +136,7 @@ export function registerGalaxyTools(server: McpServer, context: ServerContext): 
     {
       title: 'List Galaxy scripts',
       description:
-        'Lists the document\'s Galaxy files. MapScript.galaxy is flagged "generated": the editor rewrites it from trigger data on every save, so editing it accomplishes nothing. Authored libraries live under *.SC2Data.',
+        'Lists the document\'s Galaxy files. MapScript.galaxy is flagged "generated": generic patch/create operations refuse it, while sc2_set_galaxy_entrypoint can generate a bounded library entrypoint. Authored libraries live under *.SC2Data.',
       inputSchema: z.object({ workspace_id: WorkspaceIdSchema }),
       outputSchema: z.object({
         files: z.array(z.object({ path: z.string(), sizeBytes: z.number().int(), generated: z.boolean() })),
@@ -456,7 +462,7 @@ export function registerGalaxyTools(server: McpServer, context: ServerContext): 
     {
       title: 'Create a Galaxy script',
       description:
-        'Adds a new Galaxy library to the document. Refuses to replace an existing file unless overwrite=true, and never writes the generated MapScript.galaxy. The content is syntax-checked before it is written unless force=true. Note that creating the file does not make the map use it — something has to include it, and this server cannot wire that up for you.',
+        'Adds a new Galaxy library to the document. Refuses to replace an existing file unless overwrite=true, and never writes the generated MapScript.galaxy. The content is syntax-checked before it is written unless force=true. Use sc2_set_galaxy_entrypoint to make a map load the library.',
       inputSchema: z.object({
         workspace_id: WorkspaceIdSchema,
         expected_revision: z.number().int().nonnegative().optional(),
@@ -508,7 +514,7 @@ export function registerGalaxyTools(server: McpServer, context: ServerContext): 
       diagnostics.push({
         severity: 'warning',
         code: 'SC2_UNSUPPORTED_OPERATION',
-        message: 'Creating the file does not make the map use it; something must include it.',
+        message: 'Creating the file does not make the map use it; call sc2_set_galaxy_entrypoint after the library is ready.',
         path: args.path,
       });
 
@@ -520,6 +526,87 @@ export function registerGalaxyTools(server: McpServer, context: ServerContext): 
         summary: [`created ${args.path} (${args.content.length} characters)`],
         diagnostics,
         files: [{ kind: 'write', path: args.path, content: args.content }],
+      });
+
+      return ok(
+        [
+          result.dryRun ? 'DRY RUN — nothing was written.' : `Applied as ${result.changeId}.`,
+          ...result.diagnostics.map((entry) => `[${entry.severity}] ${entry.message}`),
+        ].join('\n'),
+        toStructured(result),
+      );
+    }),
+  );
+
+  server.registerTool(
+    'sc2_set_galaxy_entrypoint',
+    {
+      title: 'Set the Galaxy map entrypoint',
+      description:
+        'Generates a deterministic MapScript.galaxy that loads NativeLib, includes one authored .galaxy library, and calls one initializer from InitMap. This replaces the current generated MapScript, so the Galaxy Editor may regenerate it on a later save. Defaults to a dry run.',
+      inputSchema: z.object({
+        workspace_id: WorkspaceIdSchema,
+        expected_revision: z.number().int().nonnegative().optional(),
+        dry_run: z.boolean().optional().describe('Defaults to TRUE. Pass false to actually write.'),
+        library_path: z.string().min(1).describe('Authored library path, e.g. "Base.SC2Data/LibMCPGauntlet.galaxy".'),
+        init_function: z.string().min(1).describe('Galaxy initializer called from InitMap, e.g. "MCPG_Init".'),
+        force: z.boolean().optional().describe('Write even when the authored library has Galaxy syntax errors.'),
+      }),
+      outputSchema: ChangeResultSchema,
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+    },
+    toolHandler({ name: 'sc2_set_galaxy_entrypoint', logger }, async (args) => {
+      const library = await readGalaxy(args.workspace_id, args.library_path);
+      const rendered = renderGalaxyEntrypoint(args.library_path, args.init_function);
+      const diagnostics: { severity: 'error' | 'warning'; code: string; message: string; path?: string }[] = [];
+      const probe = await probeGalaxyToolkit();
+
+      if (probe.available) {
+        const libraryParse = await parseGalaxy(args.library_path, library);
+        const errors = libraryParse.diagnostics.filter((diagnostic) => diagnostic.severity === 'error');
+        if (errors.length > 0 && args.force !== true) {
+          throw new SC2Error('SC2_VALIDATION_FAILED', `The entrypoint library has ${errors.length} syntax error(s).`, {
+            path: args.library_path,
+            recoverable: true,
+            suggestedAction: 'Fix the library or pass force=true.',
+            context: { errors: errors.slice(0, 5).map((error) => `${error.line}:${error.column} ${error.message}`) },
+          });
+        }
+        const entrypointParse = await parseGalaxy('MapScript.galaxy', rendered.content);
+        const entrypointErrors = entrypointParse.diagnostics.filter((diagnostic) => diagnostic.severity === 'error');
+        if (entrypointErrors.length > 0) {
+          throw new SC2Error('SC2_INTERNAL_ERROR', 'The generated MapScript failed Galaxy syntax validation.', {
+            path: 'MapScript.galaxy',
+            recoverable: false,
+            context: {
+              errors: entrypointErrors.slice(0, 5).map((error) => `${error.line}:${error.column} ${error.message}`),
+            },
+          });
+        }
+      } else {
+        diagnostics.push({
+          severity: 'warning',
+          code: 'SC2_UNSUPPORTED_OPERATION',
+          message: `The library was not syntax-checked: ${probe.reason ?? 'the Galaxy toolkit is not built'}.`,
+          path: args.library_path,
+        });
+      }
+
+      diagnostics.push({
+        severity: 'warning',
+        code: 'SC2_UNSUPPORTED_OPERATION',
+        message: 'The Galaxy Editor may regenerate MapScript.galaxy from trigger data on a later save.',
+        path: 'MapScript.galaxy',
+      });
+
+      const result = await workspaces.transactions.run({
+        workspaceId: args.workspace_id,
+        operation: 'sc2_set_galaxy_entrypoint',
+        expectedRevision: args.expected_revision,
+        dryRun: args.dry_run ?? true,
+        summary: [`set MapScript.galaxy entrypoint to ${rendered.initFunction} from ${rendered.libraryPath}`],
+        diagnostics,
+        files: [{ kind: 'write', path: 'MapScript.galaxy', content: rendered.content }],
       });
 
       return ok(

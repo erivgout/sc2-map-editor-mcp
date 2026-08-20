@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Desc>
+    <Frame type="Frame" name="MCPGauntletHUD">
+        <Frame type="Label" name="MCPGauntletTitle"/>
+        <Frame type="Label" name="MCPGauntletWave"/>
+        <Frame type="Label" name="MCPGauntletLevel"/>
+        <Frame type="Label" name="MCPGauntletStatus"/>
+    </Frame>
+    <Frame type="Frame" name="MCPGauntletAbilityBar">
+        <Frame type="Button" name="MCPGauntletAbility1"/>
+        <Frame type="Button" name="MCPGauntletAbility2"/>
+        <Frame type="Button" name="MCPGauntletAbility3"/>
+        <Frame type="Button" name="MCPGauntletAbility4"/>
+    </Frame>
+    <Frame type="Frame" name="MCPGauntletUpgradePanel">
+        <Frame type="Label" name="MCPGauntletUpgradeTitle"/>
+        <Frame type="Button" name="MCPGauntletUpgradeChoice1"/>
+        <Frame type="Button" name="MCPGauntletUpgradeChoice2"/>
+        <Frame type="Button" name="MCPGauntletUpgradeChoice3"/>
+    </Frame>
+    <Frame type="Frame" name="MCPGauntletBossBar">
+        <Frame type="StatusBar" name="MCPGauntletBossHealth"/>
+        <Frame type="Label" name="MCPGauntletBossName"/>
+    </Frame>
+</Desc>

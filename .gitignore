@@ -29,6 +29,7 @@ sc2-mcp.config.local.json
 # Test/scratch output
 fixtures/generated/
 tmp/
+.gauntlet-mcp-state/
 *.log
 
 # SC2 documents produced by local integration runs

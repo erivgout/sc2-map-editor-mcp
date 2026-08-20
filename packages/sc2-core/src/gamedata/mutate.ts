@@ -388,7 +388,10 @@ export function createCatalogEntry(
   ctype: string,
   newId: string,
   sourcePath: string,
-  options: { readonly parent?: string | undefined } = {},
+  options: {
+    readonly parent?: string | undefined;
+    readonly attributes?: Readonly<Record<string, string>> | undefined;
+  } = {},
 ): CloneOutcome {
   const document = parseXml(source, { path: sourcePath });
   if (document.root?.name !== 'Catalog') {
@@ -406,13 +409,34 @@ export function createCatalogEntry(
 
   const attributes = [`id="${escapeAttribute(newId)}"`];
   if (options.parent !== undefined) attributes.push(`parent="${escapeAttribute(options.parent)}"`);
+  for (const [name, value] of Object.entries(options.attributes ?? {}).sort(([left], [right]) => left.localeCompare(right))) {
+    if (name === 'id' || name === 'parent') {
+      throw new SC2Error('SC2_INVALID_ARGUMENT', `Catalog entry attribute "${name}" has its own argument.`, {
+        path: sourcePath,
+        objectId: `${domain ?? '?'}/${newId}`,
+        recoverable: true,
+      });
+    }
+    if (!/^[A-Za-z_][A-Za-z0-9_.:-]*$/.test(name)) {
+      throw new SC2Error('SC2_INVALID_ARGUMENT', `Invalid XML attribute name: ${name}`, {
+        path: sourcePath,
+        objectId: `${domain ?? '?'}/${newId}`,
+        recoverable: true,
+      });
+    }
+    attributes.push(`${name}="${escapeAttribute(value)}"`);
+  }
 
   const editor = new XmlEditor(source);
   editor.appendChild(document.root, `<${ctype} ${attributes.join(' ')}/>`, `create ${ctype} ${newId}`);
 
   return {
     content: editor.apply(),
-    summary: [`created ${domain ?? '?'}/${newId} as <${ctype}>${options.parent === undefined ? '' : ` parent=${options.parent}`}`],
+    summary: [
+      `created ${domain ?? '?'}/${newId} as <${ctype}>${options.parent === undefined ? '' : ` parent=${options.parent}`}${
+        options.attributes === undefined ? '' : ` with ${Object.keys(options.attributes).length} root attribute(s)`
+      }`,
+    ],
   };
 }
 

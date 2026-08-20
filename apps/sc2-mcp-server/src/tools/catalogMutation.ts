@@ -304,6 +304,10 @@ export function registerCatalogMutationTools(server: McpServer, context: ServerC
         ctype: z.string().min(1).describe('Concrete catalog type, e.g. "CUnit". Determines the domain.'),
         id: z.string().min(1),
         parent: z.string().optional().describe('Id of the object to inherit from, within the same domain.'),
+        attributes: z
+          .record(z.string(), z.string())
+          .optional()
+          .describe('Additional attributes on the catalog entry itself, such as {"unitName":"MCPHeroVanguard"} for CActorUnit.'),
         file: z
           .string()
           .optional()
@@ -349,7 +353,10 @@ export function registerCatalogMutationTools(server: McpServer, context: ServerC
       const absolutePath = await workspaces.resolveWorkingPath(args.workspace_id, targetPath);
       const content = await readCatalogFileForCreation(absolutePath, targetPath);
       const createdFile = content === EMPTY_CATALOG;
-      const outcome = createCatalogEntry(content, args.ctype, args.id, targetPath, { parent: args.parent });
+      const outcome = createCatalogEntry(content, args.ctype, args.id, targetPath, {
+        parent: args.parent,
+        attributes: args.attributes,
+      });
 
       const diagnostics = [
         ...(args.parent !== undefined && index.get(domain, args.parent) === null

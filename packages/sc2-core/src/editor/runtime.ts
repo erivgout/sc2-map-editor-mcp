@@ -245,6 +245,31 @@ export function parseSc2AlertDiagnostics(content: string): Sc2RuntimeDiagnostic[
   return diagnostics;
 }
 
+/** Extracts compile and trigger failures from StarCraft II's ScriptError log. */
+export function parseSc2ScriptErrorDiagnostics(content: string): Sc2RuntimeDiagnostic[] {
+  const diagnostics: Sc2RuntimeDiagnostic[] = [];
+  const seen = new Set<string>();
+  const lines = content.split(/\r?\n/u);
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = (lines[index] ?? '').trim();
+    if (!/^(?:Script compile error:|Script load failed:|Trigger Error in )/u.test(line)) continue;
+
+    let message = line;
+    const location = (lines[index + 1] ?? '').trim();
+    if (line.startsWith('Trigger Error in ') && location.startsWith('Near line ')) {
+      message = `${message} ${location}`;
+      index += 1;
+    }
+
+    if (seen.has(message)) continue;
+    seen.add(message);
+    diagnostics.push({ severity: 'error', channel: 'SCRIPT', message });
+  }
+
+  return diagnostics;
+}
+
 async function launchWithNode(
   executablePath: string,
   args: readonly string[],

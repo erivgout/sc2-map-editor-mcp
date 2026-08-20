@@ -31,8 +31,9 @@ the sidecar binary is not there.
 | MPQ archives | ✅ | ✅ | Byte-identical round trips on real ladder maps; repacked maps open in the editor. |
 | Local dependency archives | ✅ | ❌ | Unpacked `.SC2Mod` directories are indexed; contents are read-only. |
 | Stock (CASC) dependencies | ❌ | ❌ | Need a CASC reader; reported as `in-casc`, not missing. |
-| `Attributes`, `CustomAI` | ❌ | ❌ | XML, but not modelled. |
-| `MapInfo` (binary) | ❌ | ❌ | Magic and version only. |
+| `MapInfo` player slots (binary v39) | ✅ | ✅ | Reads dimensions and full player records; writes an exact human slot range while preserving neutral/hostile records. |
+| `Attributes` player defaults | ❌ | ✅ | Not exposed as a general reader; synchronized when `MapInfo` human slots change. |
+| `CustomAI` | ❌ | ❌ | XML, but not modelled. |
 
 ## Why each gap exists
 
@@ -53,6 +54,12 @@ update refuse an unresolved logical path unless the caller explicitly allows a f
 declaration. Remove deletes only the declaration, never the staged component files. A real
 packed map with a changed `DocumentInfo` declaration was repacked, reopened through MCP,
 loaded in Galaxy Editor, and launched into gameplay.
+
+**MapInfo player slots.** The version 39 codec reads every player record and rewrites only
+the bounded player section. `sc2_set_map_player_slots` creates an exact contiguous user
+range beginning at player 1, optionally removes template computer slots, preserves neutral
+and hostile records, and updates `Attributes` lobby defaults in the same transaction. The
+result was repacked and launched in the installed client with exactly four human slots.
 
 **Galaxy type checking.** The vendored `sc2-galaxy-lang` ships a `TypeChecker`, and it is
 deliberately unused. A useful one needs the game's native declarations — `natives.galaxy`
@@ -134,7 +141,7 @@ with the captured arguments succeeded. A packed MCP-authored map reached live ga
 and an unpacked user map opened as a workspace, copied from its extensionless staging
 directory, reached an in-game result screen. `sc2_get_last_test_log` correlates GameLogs
 by launch time, reports whether the game PID is still running, includes the newest Alerts
-log, and extracts actionable alert messages. Runtime support is advertised only when the
+and ScriptError logs, and extracts actionable diagnostics from both. Runtime support is advertised only when the
 selected installation contains both SC2Switcher and a current game executable.
 
 ## Validation categories

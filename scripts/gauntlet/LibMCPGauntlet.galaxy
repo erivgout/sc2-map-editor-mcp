@@ -1,0 +1,785 @@
+// MCP Gauntlet runtime. Authored for deterministic 1-4 player cooperative play.
+
+trigger mgInitTrigger;
+trigger mgDialogTrigger;
+trigger mgDeathTrigger;
+trigger mgTickThread;
+trigger mgWaveThread;
+
+unit[5] mgHero;
+string[5] mgHeroType;
+string[20] mgAbilityNameKey;
+string[20] mgAbilityTooltipKey;
+int[5] mgLevel;
+int[5] mgXP;
+int[5] mgNextXP;
+int[5] mgPower;
+int[5] mgVitality;
+int[5] mgHaste;
+int[5] mgWisdom;
+int[5] mgRecovery;
+int[5] mgDeadSeconds;
+int[20] mgCooldown;
+bool[5] mgUpgradePending;
+int[15] mgUpgradeChoice;
+
+int[5] mgHudDialog;
+int[5] mgHudWave;
+int[5] mgHudLevel;
+int[5] mgHudStatus;
+int[20] mgAbilityButton;
+int[5] mgUpgradeDialog;
+int[15] mgUpgradeButton;
+
+unitgroup mgEnemies;
+unit mgBoss;
+int mgBossIndex;
+int mgBossPhase;
+int mgWave;
+int mgPlayerCount;
+int mgTeamWipeSeconds;
+bool mgGameEnded;
+
+int MCPG_AIndex (int player, int slot);
+int MCPG_UIndex (int player, int slot);
+bool MCPG_IsActive (int player);
+point MCPG_GatePoint (int gate);
+void MCPG_SetupStrings ();
+void MCPG_SetupPlayers ();
+void MCPG_CreateHUD (int player);
+void MCPG_UpdateHUD (int player);
+void MCPG_SpawnHero (int player);
+void MCPG_ShowUpgrade (int player);
+void MCPG_ApplyUpgrade (int player, int choice);
+void MCPG_AddXP (int player, int amount);
+void MCPG_DamageEnemies (int player, fixed radius, fixed amount, int maxTargets);
+void MCPG_HealTeam (int player, fixed amount);
+void MCPG_UseAbility (int player, int slot);
+void MCPG_ApplyEnemyScale (string unitType, int baseLife);
+unit MCPG_SpawnEnemy (string unitType, int baseLife, int gate);
+void MCPG_SpawnWave (int waveNumber);
+void MCPG_SpawnBoss (int bossIndex);
+void MCPG_CheckBossPhase ();
+void MCPG_Victory ();
+void MCPG_Defeat ();
+bool MCPG_OnMapInit (bool testConds, bool runActions);
+bool MCPG_OnDialog (bool testConds, bool runActions);
+bool MCPG_OnUnitDied (bool testConds, bool runActions);
+bool MCPG_TickLoop (bool testConds, bool runActions);
+bool MCPG_WaveLoop (bool testConds, bool runActions);
+
+int MCPG_AIndex (int player, int slot) {
+    return (player * 4) + slot;
+}
+
+int MCPG_UIndex (int player, int slot) {
+    return (player * 3) + slot;
+}
+
+bool MCPG_IsActive (int player) {
+    return (player >= 1) && (player <= 4) && (PlayerStatus(player) == c_playerStatusActive);
+}
+
+point MCPG_GatePoint (int gate) {
+    if (gate == 0) {
+        return Point(128.0, 184.0);
+    }
+    if (gate == 1) {
+        return Point(184.0, 128.0);
+    }
+    if (gate == 2) {
+        return Point(128.0, 72.0);
+    }
+    return Point(72.0, 128.0);
+}
+
+void MCPG_SetupStrings () {
+    int player;
+    int slot;
+    mgHeroType[1] = "MCPHeroVanguard";
+    mgHeroType[2] = "MCPHeroArcanist";
+    mgHeroType[3] = "MCPHeroWarden";
+    mgHeroType[4] = "MCPHeroShade";
+    player = 1;
+    while (player <= 4) {
+        slot = 0;
+        while (slot < 4) {
+            mgAbilityNameKey[MCPG_AIndex(player, slot)] = "Button/Name/MCPAbilityP" + IntToString(player) + "S" + IntToString(slot + 1);
+            mgAbilityTooltipKey[MCPG_AIndex(player, slot)] = "Button/Tooltip/MCPAbilityP" + IntToString(player) + "S" + IntToString(slot + 1);
+            slot += 1;
+        }
+        player += 1;
+    }
+}
+
+void MCPG_CreateHUD (int player) {
+    int slot;
+    int index;
+    DialogCreate(700, 118, c_anchorTop, 0, 18, true);
+    mgHudDialog[player] = DialogLastCreated();
+    libNtve_gf_CreateDialogItemButton(mgHudDialog[player], 210, 42, c_anchorTopLeft, 12, 12, StringExternal("UI/MCPGauntlet/TitleTooltip"), StringExternal("UI/MCPGauntlet/Title"), "");
+    mgHudWave[player] = DialogControlLastCreated();
+    libNtve_gf_CreateDialogItemButton(mgHudDialog[player], 210, 42, c_anchorTopLeft, 244, 12, StringExternal("UI/MCPGauntlet/WaveTooltip"), StringExternal("UI/MCPGauntlet/Wave"), "");
+    mgHudLevel[player] = DialogControlLastCreated();
+    libNtve_gf_CreateDialogItemButton(mgHudDialog[player], 210, 42, c_anchorTopLeft, 476, 12, StringExternal("UI/MCPGauntlet/StatusTooltip"), StringExternal("UI/MCPGauntlet/Status"), "");
+    mgHudStatus[player] = DialogControlLastCreated();
+    DialogSetVisible(mgHudDialog[player], PlayerGroupSingle(player), true);
+
+    DialogCreate(760, 84, c_anchorBottom, 0, 34, true);
+    slot = 0;
+    while (slot < 4) {
+        index = MCPG_AIndex(player, slot);
+        libNtve_gf_CreateDialogItemButton(DialogLastCreated(), 174, 54, c_anchorTopLeft, 12 + (slot * 186), 14, StringExternal(mgAbilityTooltipKey[index]), StringExternal(mgAbilityNameKey[index]), "");
+        mgAbilityButton[index] = DialogControlLastCreated();
+        slot += 1;
+    }
+    DialogSetVisible(DialogLastCreated(), PlayerGroupSingle(player), true);
+
+    DialogCreate(720, 252, c_anchorCenter, 0, 0, true);
+    mgUpgradeDialog[player] = DialogLastCreated();
+    libNtve_gf_CreateDialogItemButton(mgUpgradeDialog[player], 680, 44, c_anchorTopLeft, 20, 18, StringExternal("UI/MCPGauntlet/UpgradeTitleTooltip"), StringExternal("UI/MCPGauntlet/UpgradeTitle"), "");
+    slot = 0;
+    while (slot < 3) {
+        libNtve_gf_CreateDialogItemButton(mgUpgradeDialog[player], 210, 140, c_anchorTopLeft, 20 + (slot * 230), 82, StringExternal("Upgrade/Tooltip/0"), StringExternal("Upgrade/Name/0"), "");
+        mgUpgradeButton[MCPG_UIndex(player, slot)] = DialogControlLastCreated();
+        slot += 1;
+    }
+    DialogSetVisible(mgUpgradeDialog[player], PlayerGroupSingle(player), false);
+}
+
+void MCPG_UpdateHUD (int player) {
+    text waveText;
+    text levelText;
+    text statusText;
+    if (!MCPG_IsActive(player)) {
+        return;
+    }
+    waveText = StringToText("WAVE ") + IntToText(mgWave) + StringToText(" / 12");
+    levelText = StringToText("LEVEL ") + IntToText(mgLevel[player]) + StringToText("   XP ") + IntToText(mgXP[player]) + StringToText(" / ") + IntToText(mgNextXP[player]);
+    if (mgDeadSeconds[player] > 0) {
+        statusText = StringToText("DOWNED   REVIVE ") + IntToText(MaxI(0, MaxI(4, 12 - (mgRecovery[player] * 2)) - mgDeadSeconds[player])) + StringToText("s");
+    }
+    else {
+        statusText = StringToText("POWER ") + IntToText(mgPower[player]) + StringToText("   READY");
+    }
+    DialogControlSetPropertyAsText(mgHudWave[player], c_triggerControlPropertyText, PlayerGroupSingle(player), waveText);
+    DialogControlSetPropertyAsText(mgHudLevel[player], c_triggerControlPropertyText, PlayerGroupSingle(player), levelText);
+    DialogControlSetPropertyAsText(mgHudStatus[player], c_triggerControlPropertyText, PlayerGroupSingle(player), statusText);
+}
+
+void MCPG_SpawnHero (int player) {
+    point spawnPoint;
+    fixed maxLife;
+    bool isRevive;
+    isRevive = mgDeadSeconds[player] > 0;
+    spawnPoint = Point(122.0 + (player * 2.4), 124.0 + ((player % 2) * 7.0));
+    libNtve_gf_CreateUnitsWithDefaultFacing(1, mgHeroType[player], 0, player, spawnPoint);
+    mgHero[player] = UnitLastCreated();
+    maxLife = UnitGetPropertyFixed(mgHero[player], c_unitPropLifeMax, c_unitPropCurrent) + IntToFixed(mgVitality[player] * 50);
+    UnitSetPropertyFixed(mgHero[player], c_unitPropLifeMax, maxLife);
+    UnitSetPropertyFixed(mgHero[player], c_unitPropLife, maxLife);
+    UnitControlGroupAddUnit(player, 1, mgHero[player]);
+    CameraPan(player, spawnPoint, 0.0, -1.0, 10.0, false);
+    mgDeadSeconds[player] = 0;
+    if (isRevive) {
+        UIDisplayMessage(PlayerGroupSingle(player), c_messageAreaSubtitle, StringExternal("UI/MCPGauntlet/Revived"));
+    }
+}
+
+void MCPG_ShowUpgrade (int player) {
+    int slot;
+    int choice;
+    int index;
+    if (mgUpgradePending[player]) {
+        return;
+    }
+    mgUpgradePending[player] = true;
+    slot = 0;
+    while (slot < 3) {
+        choice = RandomInt(0, 7);
+        while (((slot >= 1) && (choice == mgUpgradeChoice[MCPG_UIndex(player, 0)])) || ((slot >= 2) && (choice == mgUpgradeChoice[MCPG_UIndex(player, 1)]))) {
+            choice = (choice + 1) % 8;
+        }
+        index = MCPG_UIndex(player, slot);
+        mgUpgradeChoice[index] = choice;
+        DialogControlSetPropertyAsText(mgUpgradeButton[index], c_triggerControlPropertyText, PlayerGroupSingle(player), StringExternal("Upgrade/Name/" + IntToString(choice)));
+        DialogControlSetPropertyAsText(mgUpgradeButton[index], c_triggerControlPropertyTooltip, PlayerGroupSingle(player), StringExternal("Upgrade/Tooltip/" + IntToString(choice)));
+        slot += 1;
+    }
+    DialogSetVisible(mgUpgradeDialog[player], PlayerGroupSingle(player), true);
+}
+
+void MCPG_ApplyUpgrade (int player, int choice) {
+    fixed maxLife;
+    if (choice == 0) {
+        mgPower[player] += 5;
+    }
+    else if (choice == 1) {
+        mgVitality[player] += 1;
+        if (UnitIsAlive(mgHero[player])) {
+            maxLife = UnitGetPropertyFixed(mgHero[player], c_unitPropLifeMax, c_unitPropCurrent) + 50.0;
+            UnitSetPropertyFixed(mgHero[player], c_unitPropLifeMax, maxLife);
+            UnitSetPropertyFixed(mgHero[player], c_unitPropLife, maxLife);
+        }
+    }
+    else if (choice == 2) {
+        mgHaste[player] += 1;
+    }
+    else if (choice == 3) {
+        mgWisdom[player] += 1;
+    }
+    else if (choice == 4) {
+        CatalogFieldValueModify(c_gameCatalogUnit, mgHeroType[player], "LifeArmor", player, IntToString(2 + mgLevel[player]), c_upgradeOperationSet);
+    }
+    else if (choice == 5) {
+        mgRecovery[player] = MinI(5, mgRecovery[player] + 1);
+    }
+    else if (choice == 6) {
+        mgXP[player] += 20;
+    }
+    else {
+        mgPower[player] += 3;
+        mgHaste[player] += 1;
+    }
+    mgUpgradePending[player] = false;
+    DialogSetVisible(mgUpgradeDialog[player], PlayerGroupSingle(player), false);
+    UIDisplayMessage(PlayerGroupSingle(player), c_messageAreaSubtitle, StringExternal("UI/MCPGauntlet/UpgradeApplied"));
+}
+
+void MCPG_AddXP (int player, int amount) {
+    if (!MCPG_IsActive(player)) {
+        return;
+    }
+    mgXP[player] += amount + (mgWisdom[player] * 2);
+    while (mgXP[player] >= mgNextXP[player]) {
+        mgXP[player] -= mgNextXP[player];
+        mgLevel[player] += 1;
+        mgNextXP[player] = 70 + (mgLevel[player] * 35);
+        MCPG_ShowUpgrade(player);
+        UIDisplayMessage(PlayerGroupSingle(player), c_messageAreaSubtitle, StringExternal("UI/MCPGauntlet/LevelUp"));
+    }
+}
+
+void MCPG_DamageEnemies (int player, fixed radius, fixed amount, int maxTargets) {
+    unitgroup targets;
+    unit target;
+    int count;
+    fixed life;
+    targets = UnitGroup(null, 15, RegionCircle(UnitGetPosition(mgHero[player]), radius), UnitFilter(0, 0, (1 << c_targetFilterMissile), (1 << (c_targetFilterDead - 32))), maxTargets);
+    count = UnitGroupCount(targets, c_unitCountAll);
+    while (count > 0) {
+        target = UnitGroupUnitFromEnd(targets, count);
+        if (target != null) {
+            life = UnitGetPropertyFixed(target, c_unitPropLife, c_unitPropCurrent);
+            if (life <= amount) {
+                UnitKill(target);
+            }
+            else {
+                UnitSetPropertyFixed(target, c_unitPropLife, life - amount);
+            }
+        }
+        count -= 1;
+    }
+}
+
+void MCPG_HealTeam (int player, fixed amount) {
+    int ally;
+    fixed life;
+    fixed maxLife;
+    ally = 1;
+    while (ally <= 4) {
+        if (MCPG_IsActive(ally) && UnitIsAlive(mgHero[ally])) {
+            life = UnitGetPropertyFixed(mgHero[ally], c_unitPropLife, c_unitPropCurrent);
+            maxLife = UnitGetPropertyFixed(mgHero[ally], c_unitPropLifeMax, c_unitPropCurrent);
+            UnitSetPropertyFixed(mgHero[ally], c_unitPropLife, MinF(maxLife, life + amount));
+        }
+        ally += 1;
+    }
+}
+
+void MCPG_UseAbility (int player, int slot) {
+    int index;
+    fixed damage;
+    unit clone;
+    if (!MCPG_IsActive(player) || !UnitIsAlive(mgHero[player]) || mgUpgradePending[player]) {
+        return;
+    }
+    index = MCPG_AIndex(player, slot);
+    if (mgCooldown[index] > 0) {
+        UIDisplayMessage(PlayerGroupSingle(player), c_messageAreaSubtitle, StringExternal("UI/MCPGauntlet/Cooldown"));
+        return;
+    }
+    damage = IntToFixed(55 + (mgLevel[player] * 8) + mgPower[player]);
+    if (player == 1) {
+        if (slot == 0) {
+            MCPG_DamageEnemies(player, 5.0, damage, 6);
+            mgCooldown[index] = MaxI(2, 6 - mgHaste[player]);
+        }
+        else if (slot == 1) {
+            MCPG_HealTeam(player, 45.0 + IntToFixed(mgPower[player]));
+            mgCooldown[index] = MaxI(5, 12 - mgHaste[player]);
+        }
+        else if (slot == 2) {
+            UnitSetPosition(mgHero[player], Point(128.0, 128.0), true);
+            mgCooldown[index] = MaxI(5, 14 - mgHaste[player]);
+        }
+        else {
+            MCPG_DamageEnemies(player, 9.0, damage * 3.0, 0);
+            MCPG_HealTeam(player, 80.0);
+            mgCooldown[index] = MaxI(18, 42 - (mgHaste[player] * 2));
+        }
+    }
+    else if (player == 2) {
+        if (slot == 0) {
+            MCPG_DamageEnemies(player, 9.0, damage * 1.4, 3);
+            mgCooldown[index] = MaxI(2, 7 - mgHaste[player]);
+        }
+        else if (slot == 1) {
+            mgCooldown[MCPG_AIndex(player, 0)] = 0;
+            mgCooldown[MCPG_AIndex(player, 2)] = MaxI(0, mgCooldown[MCPG_AIndex(player, 2)] - 5);
+            mgCooldown[index] = MaxI(8, 20 - mgHaste[player]);
+        }
+        else if (slot == 2) {
+            MCPG_DamageEnemies(player, 7.0, damage * 1.8, 0);
+            mgCooldown[index] = MaxI(7, 16 - mgHaste[player]);
+        }
+        else {
+            MCPG_DamageEnemies(player, 12.0, damage * 4.0, 0);
+            mgCooldown[index] = MaxI(20, 48 - (mgHaste[player] * 2));
+        }
+    }
+    else if (player == 3) {
+        if (slot == 0) {
+            MCPG_DamageEnemies(player, 6.5, damage * 1.6, 0);
+            mgCooldown[index] = MaxI(3, 8 - mgHaste[player]);
+        }
+        else if (slot == 1) {
+            MCPG_HealTeam(player, 70.0 + IntToFixed(mgVitality[player] * 10));
+            mgCooldown[index] = MaxI(7, 16 - mgHaste[player]);
+        }
+        else if (slot == 2) {
+            MCPG_DamageEnemies(player, 10.0, damage, 0);
+            mgCooldown[index] = MaxI(8, 20 - mgHaste[player]);
+        }
+        else {
+            MCPG_HealTeam(player, 150.0);
+            MCPG_DamageEnemies(player, 8.0, damage * 2.0, 0);
+            mgCooldown[index] = MaxI(22, 50 - (mgHaste[player] * 2));
+        }
+    }
+    else {
+        if (slot == 0) {
+            MCPG_DamageEnemies(player, 8.0, damage * 1.5, 2);
+            mgCooldown[index] = MaxI(2, 6 - mgHaste[player]);
+        }
+        else if (slot == 1) {
+            UnitSetPosition(mgHero[player], Point(128.0 + IntToFixed(RandomInt(-12, 12)), 128.0 + IntToFixed(RandomInt(-12, 12))), true);
+            mgCooldown[index] = MaxI(5, 13 - mgHaste[player]);
+        }
+        else if (slot == 2) {
+            MCPG_DamageEnemies(player, 7.0, damage * 3.0, 1);
+            mgCooldown[index] = MaxI(8, 18 - mgHaste[player]);
+        }
+        else {
+            libNtve_gf_CreateUnitsWithDefaultFacing(1, "Ghost", 0, player, UnitGetPosition(mgHero[player]));
+            clone = UnitLastCreated();
+            UnitIssueOrder(clone, OrderTargetingPoint(AbilityCommand("attack", 0), Point(128.0, 128.0)), c_orderQueueReplace);
+            mgCooldown[index] = MaxI(20, 46 - (mgHaste[player] * 2));
+        }
+    }
+}
+
+void MCPG_ApplyEnemyScale (string unitType, int baseLife) {
+    int scaledLife;
+    scaledLife = (baseLife * (100 + ((mgPlayerCount - 1) * 65) + (mgWave * 12))) / 100;
+    CatalogFieldValueModify(c_gameCatalogUnit, unitType, "LifeMax", 15, IntToString(scaledLife), c_upgradeOperationSet);
+    CatalogFieldValueModify(c_gameCatalogUnit, unitType, "LifeStart", 15, IntToString(scaledLife), c_upgradeOperationSet);
+}
+
+unit MCPG_SpawnEnemy (string unitType, int baseLife, int gate) {
+    unit created;
+    MCPG_ApplyEnemyScale(unitType, baseLife);
+    libNtve_gf_CreateUnitsWithDefaultFacing(1, unitType, 0, 15, MCPG_GatePoint(gate));
+    created = UnitLastCreated();
+    UnitGroupAdd(mgEnemies, created);
+    UnitIssueOrder(created, OrderTargetingPoint(AbilityCommand("attack", 0), Point(128.0, 128.0)), c_orderQueueReplace);
+    return created;
+}
+
+void MCPG_SpawnWave (int waveNumber) {
+    int count;
+    int index;
+    int gate;
+    string unitType;
+    int baseLife;
+    count = 4 + (waveNumber * 2) + (mgPlayerCount * 3);
+    index = 0;
+    while (index < count) {
+        gate = index % 4;
+        if ((index > 0) && ((index % MaxI(4, 8 - mgPlayerCount)) == 0)) {
+            if ((waveNumber % 2) == 0) {
+                unitType = "MCPEnemyEliteJuggernaut";
+                baseLife = 520;
+            }
+            else {
+                unitType = "MCPEnemyEliteReaver";
+                baseLife = 420;
+            }
+        }
+        else if ((index % 3) == 0) {
+            unitType = "MCPEnemyCaster";
+            baseLife = 135;
+        }
+        else if ((index % 2) == 0) {
+            unitType = "MCPEnemyBrute";
+            baseLife = 190;
+        }
+        else {
+            unitType = "MCPEnemySkitter";
+            baseLife = 90;
+        }
+        MCPG_SpawnEnemy(unitType, baseLife, gate);
+        index += 1;
+    }
+}
+
+void MCPG_SpawnBoss (int bossIndex) {
+    string bossType;
+    int baseLife;
+    if (bossIndex == 1) {
+        bossType = "MCPBossBroodmother";
+        baseLife = 3200;
+    }
+    else if (bossIndex == 2) {
+        bossType = "MCPBossWarMachine";
+        baseLife = 5200;
+    }
+    else {
+        bossType = "MCPBossVoidTitan";
+        baseLife = 7600;
+    }
+    mgBossIndex = bossIndex;
+    mgBossPhase = 1;
+    mgBoss = MCPG_SpawnEnemy(bossType, baseLife, bossIndex % 4);
+    libNtve_gf_DisplayBossBar(1, "Assets\\Textures\\btn-unit-protoss-archon.dds", UnitGetName(mgBoss), UnitGetPropertyInt(mgBoss, c_unitPropLifeMax, c_unitPropCurrent), PlayerGroupAll());
+    UIDisplayMessage(PlayerGroupAll(), c_messageAreaSubtitle, StringExternal("UI/MCPGauntlet/BossArrived"));
+}
+
+void MCPG_CheckBossPhase () {
+    int currentLife;
+    int maxLife;
+    int gate;
+    if ((mgBoss == null) || !UnitIsAlive(mgBoss)) {
+        return;
+    }
+    currentLife = UnitGetPropertyInt(mgBoss, c_unitPropLife, c_unitPropCurrent);
+    maxLife = MaxI(1, UnitGetPropertyInt(mgBoss, c_unitPropLifeMax, c_unitPropCurrent));
+    libNtve_gf_SetBossBarCurrentValue(1, currentLife, true);
+    if ((mgBossPhase == 1) && ((currentLife * 100) <= (maxLife * 66))) {
+        mgBossPhase = 2;
+        gate = 0;
+        while (gate < 4) {
+            if (mgBossIndex == 1) {
+                MCPG_SpawnEnemy("MCPEnemySkitter", 90, gate);
+                MCPG_SpawnEnemy("MCPEnemySkitter", 90, gate);
+            }
+            else if (mgBossIndex == 2) {
+                MCPG_SpawnEnemy("MCPEnemyEliteJuggernaut", 520, gate);
+            }
+            else {
+                MCPG_SpawnEnemy("MCPEnemyCaster", 135, gate);
+                MCPG_SpawnEnemy("MCPEnemyBrute", 190, gate);
+            }
+            gate += 1;
+        }
+        UIDisplayMessage(PlayerGroupAll(), c_messageAreaSubtitle, StringExternal("UI/MCPGauntlet/BossPhaseTwo"));
+    }
+    else if ((mgBossPhase == 2) && ((currentLife * 100) <= (maxLife * 33))) {
+        mgBossPhase = 3;
+        gate = 0;
+        while (gate < 4) {
+            MCPG_SpawnEnemy("MCPEnemyEliteReaver", 420, gate);
+            if (mgBossIndex == 3) {
+                MCPG_SpawnEnemy("MCPEnemyEliteJuggernaut", 520, gate);
+            }
+            gate += 1;
+        }
+        UIDisplayMessage(PlayerGroupAll(), c_messageAreaSubtitle, StringExternal("UI/MCPGauntlet/BossPhaseThree"));
+    }
+}
+
+void MCPG_Victory () {
+    int player;
+    if (mgGameEnded) {
+        return;
+    }
+    mgGameEnded = true;
+    UIDisplayMessage(PlayerGroupAll(), c_messageAreaSubtitle, StringExternal("UI/MCPGauntlet/Victory"));
+    Wait(3.0, c_timeGame);
+    player = 1;
+    while (player <= 4) {
+        if (MCPG_IsActive(player)) {
+            GameOver(player, c_gameOverVictory, true, true);
+        }
+        player += 1;
+    }
+}
+
+void MCPG_Defeat () {
+    int player;
+    if (mgGameEnded) {
+        return;
+    }
+    mgGameEnded = true;
+    UIDisplayMessage(PlayerGroupAll(), c_messageAreaSubtitle, StringExternal("UI/MCPGauntlet/Defeat"));
+    Wait(3.0, c_timeGame);
+    player = 1;
+    while (player <= 4) {
+        if (MCPG_IsActive(player)) {
+            GameOver(player, c_gameOverDefeat, true, true);
+        }
+        player += 1;
+    }
+}
+
+bool MCPG_OnMapInit (bool testConds, bool runActions) {
+    int player;
+    if (!runActions) {
+        return true;
+    }
+    mgEnemies = UnitGroupEmpty();
+    mgWave = 0;
+    mgGameEnded = false;
+    MCPG_SetupStrings();
+    MCPG_SetupPlayers();
+    player = 1;
+    while (player <= 4) {
+        if (MCPG_IsActive(player)) {
+            MCPG_CreateHUD(player);
+            MCPG_SpawnHero(player);
+            MCPG_UpdateHUD(player);
+        }
+        player += 1;
+    }
+    UIDisplayMessage(PlayerGroupAll(), c_messageAreaSubtitle, StringExternal("UI/MCPGauntlet/Welcome"));
+    TriggerExecute(mgTickThread, false, false);
+    TriggerExecute(mgWaveThread, false, false);
+    return true;
+}
+
+void MCPG_SetupPlayers () {
+    int player;
+    int ally;
+    mgPlayerCount = 0;
+    player = 1;
+    while (player <= 4) {
+        mgLevel[player] = 1;
+        mgXP[player] = 0;
+        mgNextXP[player] = 70;
+        mgPower[player] = 0;
+        mgVitality[player] = 0;
+        mgHaste[player] = 0;
+        mgWisdom[player] = 0;
+        mgRecovery[player] = 0;
+        mgDeadSeconds[player] = 0;
+        if (MCPG_IsActive(player)) {
+            mgPlayerCount += 1;
+        }
+        ally = 1;
+        while (ally <= 4) {
+            if (player != ally) {
+                libNtve_gf_SetAlliance(player, ally, libNtve_ge_AllianceSetting_AllyWithSharedVision);
+            }
+            ally += 1;
+        }
+        player += 1;
+    }
+    mgPlayerCount = MaxI(1, mgPlayerCount);
+}
+
+bool MCPG_OnDialog (bool testConds, bool runActions) {
+    int player;
+    int slot;
+    int index;
+    int control;
+    if (!runActions) {
+        return true;
+    }
+    player = EventPlayer();
+    control = EventDialogControl();
+    if (!MCPG_IsActive(player)) {
+        return true;
+    }
+    slot = 0;
+    while (slot < 4) {
+        if (control == mgAbilityButton[MCPG_AIndex(player, slot)]) {
+            MCPG_UseAbility(player, slot);
+            return true;
+        }
+        slot += 1;
+    }
+    if (mgUpgradePending[player]) {
+        slot = 0;
+        while (slot < 3) {
+            index = MCPG_UIndex(player, slot);
+            if (control == mgUpgradeButton[index]) {
+                MCPG_ApplyUpgrade(player, mgUpgradeChoice[index]);
+                return true;
+            }
+            slot += 1;
+        }
+    }
+    return true;
+}
+
+bool MCPG_OnUnitDied (bool testConds, bool runActions) {
+    unit deadUnit;
+    int player;
+    int reward;
+    string deadType;
+    if (!runActions) {
+        return true;
+    }
+    deadUnit = EventUnit();
+    if (UnitGetOwner(deadUnit) == 15) {
+        deadType = UnitGetType(deadUnit);
+        reward = 8;
+        if ((deadType == "MCPEnemyEliteJuggernaut") || (deadType == "MCPEnemyEliteReaver")) {
+            reward = 28;
+        }
+        if (deadUnit == mgBoss) {
+            reward = 90 + (mgBossIndex * 30);
+            libNtve_gf_SetBossBarCurrentValue(1, 0, true);
+            libNtve_gf_ShowHideBossBar(false, 1);
+            mgBoss = null;
+        }
+        UnitGroupRemove(mgEnemies, deadUnit);
+        player = 1;
+        while (player <= 4) {
+            MCPG_AddXP(player, reward);
+            player += 1;
+        }
+    }
+    else {
+        player = 1;
+        while (player <= 4) {
+            if (deadUnit == mgHero[player]) {
+                mgDeadSeconds[player] = 1;
+                UIDisplayMessage(PlayerGroupAll(), c_messageAreaSubtitle, PlayerName(player) + StringExternal("UI/MCPGauntlet/PlayerDown"));
+            }
+            player += 1;
+        }
+    }
+    return true;
+}
+
+bool MCPG_TickLoop (bool testConds, bool runActions) {
+    int player;
+    int slot;
+    int alivePlayers;
+    int reviveAt;
+    int wipeLimit;
+    if (!runActions) {
+        return true;
+    }
+    while (!mgGameEnded) {
+        alivePlayers = 0;
+        player = 1;
+        while (player <= 4) {
+            if (MCPG_IsActive(player)) {
+                slot = 0;
+                while (slot < 4) {
+                    if (mgCooldown[MCPG_AIndex(player, slot)] > 0) {
+                        mgCooldown[MCPG_AIndex(player, slot)] -= 1;
+                    }
+                    slot += 1;
+                }
+                if (UnitIsAlive(mgHero[player])) {
+                    alivePlayers += 1;
+                }
+                else if (mgDeadSeconds[player] > 0) {
+                    mgDeadSeconds[player] += 1;
+                }
+                MCPG_UpdateHUD(player);
+            }
+            player += 1;
+        }
+        if ((alivePlayers == 0) && (mgPlayerCount == 1)) {
+            player = 1;
+            while (player <= 4) {
+                reviveAt = MaxI(4, 12 - (mgRecovery[player] * 2));
+                if (MCPG_IsActive(player) && !UnitIsAlive(mgHero[player]) && (mgDeadSeconds[player] >= reviveAt)) {
+                    MCPG_SpawnHero(player);
+                    alivePlayers = 1;
+                }
+                player += 1;
+            }
+        }
+        if (alivePlayers == 0) {
+            mgTeamWipeSeconds += 1;
+            wipeLimit = 8;
+            if (mgPlayerCount == 1) {
+                wipeLimit = 15;
+            }
+            if (mgTeamWipeSeconds >= wipeLimit) {
+                MCPG_Defeat();
+            }
+        }
+        else {
+            mgTeamWipeSeconds = 0;
+            player = 1;
+            while (player <= 4) {
+                reviveAt = MaxI(4, 12 - (mgRecovery[player] * 2));
+                if (MCPG_IsActive(player) && !UnitIsAlive(mgHero[player]) && (mgDeadSeconds[player] >= reviveAt)) {
+                    MCPG_SpawnHero(player);
+                }
+                player += 1;
+            }
+        }
+        MCPG_CheckBossPhase();
+        Wait(1.0, c_timeGame);
+    }
+    return true;
+}
+
+bool MCPG_WaveLoop (bool testConds, bool runActions) {
+    if (!runActions) {
+        return true;
+    }
+    Wait(6.0, c_timeGame);
+    mgWave = 1;
+    while ((mgWave <= 12) && !mgGameEnded) {
+        UIDisplayMessage(PlayerGroupAll(), c_messageAreaSubtitle, StringExternal("UI/MCPGauntlet/WaveIncoming") + IntToText(mgWave));
+        if ((mgWave % 4) == 0) {
+            MCPG_SpawnBoss(mgWave / 4);
+        }
+        else {
+            MCPG_SpawnWave(mgWave);
+        }
+        while ((UnitGroupCount(mgEnemies, c_unitCountAlive) > 0) && !mgGameEnded) {
+            Wait(1.0, c_timeGame);
+        }
+        if (mgGameEnded) {
+            break;
+        }
+        if (mgWave == 12) {
+            MCPG_Victory();
+            break;
+        }
+        UIDisplayMessage(PlayerGroupAll(), c_messageAreaSubtitle, StringExternal("UI/MCPGauntlet/WaveCleared"));
+        Wait(8.0, c_timeGame);
+        mgWave += 1;
+    }
+    return true;
+}
+
+void MCPG_Init () {
+    mgInitTrigger = TriggerCreate("MCPG_OnMapInit");
+    TriggerAddEventMapInit(mgInitTrigger);
+    mgDialogTrigger = TriggerCreate("MCPG_OnDialog");
+    TriggerAddEventDialogControl(mgDialogTrigger, c_playerAny, c_invalidDialogControlId, c_triggerControlEventTypeClick);
+    mgDeathTrigger = TriggerCreate("MCPG_OnUnitDied");
+    TriggerAddEventUnitDied(mgDeathTrigger, null);
+    mgTickThread = TriggerCreate("MCPG_TickLoop");
+    mgWaveThread = TriggerCreate("MCPG_WaveLoop");
+}

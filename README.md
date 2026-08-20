@@ -25,6 +25,7 @@ answer for a running build. As of now:
 | SC2Layout | ✅ | ✅ | List, read, diagnose, search, create, and losslessly patch layout elements |
 | Placed objects / regions | ✅ | ✅ | Both are XML, not binary. Place, move, delete — round-tripped through the editor. Terrain height is not consulted |
 | Terrain | ✅ | ✅ | Typed height, texture, pathing, and cliff reads/writes, synchronized-file updates, validation, and bounded raw component access. See [docs/terrain.md](docs/terrain.md) |
+| Map player slots | ✅ | ✅ | Reads and rewrites version 39 `MapInfo` player entries; synchronizes `Attributes` lobby defaults |
 | Editor/test launch | ✅ | ✅ | Opens documents in the Galaxy Editor; writes bounded `Maps\Test` staging; launches packed or workspace maps; reports editor/game logs |
 
 Why the gaps are where they are, and what "⚠️" means in each row:
@@ -47,8 +48,8 @@ staged copy, or a blank Galaxy Editor. `sc2_test_document` accepts a packed `.SC
 map workspace, copies it to the installation-owned `Maps\Test` area without changing the
 source, and launches it through the editor-compatible SC2Switcher workflow. It refuses to
 start if another StarCraft II client is running. After launch, `sc2_get_last_test_log`
-reports whether the game is still running and returns the GameLogs and parsed Alerts for
-that specific run.
+reports whether the game is still running and returns the GameLogs plus parsed Alerts and
+ScriptError diagnostics for that specific run.
 
 ### Tools
 
@@ -73,7 +74,7 @@ that specific run.
 | `sc2_find_catalog_references` | yes | What refers to an object, and whether it is shared |
 | `sc2_patch_catalog_object` | no | Field-level edits by path, with shared-object warnings |
 | `sc2_clone_catalog_object` | no | Copy an object under a new id, byte-for-byte |
-| `sc2_create_catalog_object` | no | Add a new object, ideally with a parent |
+| `sc2_create_catalog_object` | no | Add a new object with a parent, root attributes, and child fields |
 | `sc2_delete_catalog_object` | no | Remove an object; refuses while referenced |
 | `sc2_list_locales` | yes | Locales and text tables present |
 | `sc2_search_text_keys` | yes | Search a text table by key or value |
@@ -85,14 +86,17 @@ that specific run.
 | `sc2_launch_editor` | no | Open a document in the Galaxy Editor to confirm it loads |
 | `sc2_get_editor_logs` | yes | List or read the editor's own logs |
 | `sc2_test_document` | no | Stage and launch a map through the editor-compatible SC2Switcher workflow |
-| `sc2_get_last_test_log` | yes | Running/exited status, game logs, and parsed Alerts messages for the last test |
+| `sc2_get_last_test_log` | yes | Running/exited status, game logs, and parsed Alerts and ScriptError diagnostics for the last test |
 | `sc2_get_user_maps` | yes | The user's Maps folder, resolved through the registry |
+| `sc2_get_map_players` | yes | Read version 39 `MapInfo` lobby/player entries |
+| `sc2_set_map_player_slots` | no | Set an exact contiguous human slot range and synchronize `Attributes` defaults |
 | `sc2_list_galaxy_files` | yes | Scripts in the document; flags the generated MapScript |
 | `sc2_get_galaxy_file` | yes | Read a script, optionally by line range |
 | `sc2_get_galaxy_symbols` | yes | Functions, variables, structs, includes |
 | `sc2_get_galaxy_diagnostics` | yes | Syntax errors with line and column |
 | `sc2_apply_galaxy_patch` | no | Exact-text edit, refused if it breaks the parse |
 | `sc2_create_galaxy_file` | no | Add a library, syntax-checked first |
+| `sc2_set_galaxy_entrypoint` | no | Generate a bounded `MapScript.galaxy` that includes one authored library and calls its initializer |
 | `sc2_list_layouts` | yes | Layout files with frame and diagnostic counts |
 | `sc2_get_layout` | yes | Exact layout source plus an element index |
 | `sc2_get_layout_diagnostics` | yes | XML and structural layout diagnostics |
@@ -189,6 +193,24 @@ pnpm run verify
 `verify` runs lint, typecheck, build, and the full test suite — including an
 integration test that spawns the built server as a real child process and speaks MCP to
 it over stdio.
+
+### MCP Gauntlet acceptance map
+
+`scripts/gauntlet-acceptance.mjs` drives the built MCP server to turn a blank/template map
+into the four-player survival roguelite used for end-to-end acceptance. The generated
+`.SC2Map` stays in the user's Maps directory and is intentionally not committed.
+
+```powershell
+$env:SC2MCP_GAUNTLET_MAPS_ROOT = "$env:USERPROFILE\Documents\StarCraft II\Maps"
+node scripts/gauntlet-acceptance.mjs build 'Blank.SC2Map'
+node scripts/gauntlet-acceptance.mjs inspect 'MCP Gauntlet.SC2Map'
+node scripts/gauntlet-acceptance.mjs test 'MCP Gauntlet.SC2Map'
+```
+
+The build command creates and validates all map data through MCP, commits the packed map,
+and checks the reopened archive. The test command launches the installed SC2 client and
+polls Alerts and ScriptError diagnostics. `logs` performs a one-shot query against the
+current server process and is mainly useful while extending the harness.
 
 To read or write packed `.SC2Map` archives you also need the `sc2mpq` sidecar, which is
 built rather than shipped — it is a native binary, and a committed one would carry the

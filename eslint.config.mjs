@@ -16,7 +16,7 @@ export default defineConfig([
         projectService: {
           // Root-level config files are not part of any tsconfig `include`, but they
           // still deserve linting.
-          allowDefaultProject: ['eslint.config.mjs'],
+          allowDefaultProject: ['eslint.config.mjs', 'scripts/gauntlet-acceptance.mjs'],
         },
         tsconfigRootDir: import.meta.dirname,
       },
@@ -61,6 +61,15 @@ export default defineConfig([
       '@typescript-eslint/no-unsafe-assignment': 'off',
       '@typescript-eslint/no-unsafe-member-access': 'off',
       '@typescript-eslint/no-unsafe-argument': 'off',
+      'no-console': 'off',
+    },
+  },
+  {
+    files: ['scripts/**/*.mjs'],
+    ...tseslint.configs.disableTypeChecked,
+    rules: {
+      ...tseslint.configs.disableTypeChecked.rules,
+      '@typescript-eslint/explicit-function-return-type': 'off',
       'no-console': 'off',
     },
   },

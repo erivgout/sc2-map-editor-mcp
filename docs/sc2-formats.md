@@ -167,9 +167,11 @@ get wrong here: assuming either convention misreads half the files.
 
 `readBinaryHeader` therefore reports both forms rather than picking one.
 
-`MapInfo` version 39 is what editor build 97563 writes. `MapInfo` remains header-only and
-is not writable. Terrain has separate version-gated codecs described in
-[terrain.md](terrain.md).
+`MapInfo` version 39 is what editor build 97563 writes. The codec reads map dimensions and
+all player records, and can replace the bounded player section while preserving the
+unmodelled tail byte-for-byte. The writer supports exact contiguous human slots and
+preserves neutral/hostile records. Other `MapInfo` versions remain unsupported. Terrain has
+separate version-gated codecs described in [terrain.md](terrain.md).
 
 ---
 
@@ -228,13 +230,13 @@ optional `<Flag Index Value>` children.
 carrying `<center value>` and `<radius value>`. Marker elements such as `<invisible/>`
 appear with no value.
 
-**`Attributes`** and **`CustomAI`** — also XML; not yet modelled.
+**`Attributes`** and **`CustomAI`** — also XML. `Attributes` player defaults are updated
+when the `MapInfo` human slot range changes; its remaining contents and `CustomAI` are not
+otherwise modelled.
 
 ## Not yet examined
 
-- `Attributes`, `CustomAI` contents.
-- `MapScript.galaxy` — generated from the trigger data; must never be hand-edited as if it
-  were a source file.
+- `Attributes` beyond player defaults, and `CustomAI` contents.
+- `MapScript.galaxy` is generated from trigger data. Arbitrary editing remains unsupported;
+  the bounded entrypoint writer can include one authored library and call its initializer.
 - `PreloadAssetDB.txt`, `Preload.xml`, `BankList.xml`.
-- Packed `.SC2Map` archive layout — blocked on the `sc2mpq` helper being built
-  (see [native-helper.md](native-helper.md)).
