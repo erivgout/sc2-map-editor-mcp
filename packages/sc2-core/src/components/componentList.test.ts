@@ -102,10 +102,12 @@ describe('parseComponentList', () => {
     expect(list.missing.map((component) => component.typeCode)).toContain('gada');
   });
 
-  it('never claims a component is writable', () => {
-    // PLAN.md §11: being able to read a file is not being able to serialise it safely.
+  it('reports content writers separately from readers', () => {
     const list = parseComponentList(REAL_COMPONENT_LIST, REAL_STAGED_PATHS);
-    expect(list.components.every((component) => !component.writable)).toBe(true);
+    expect(list.components.find((component) => component.typeCode === 'gada')?.writable).toBe(true);
+    expect(list.components.find((component) => component.typeCode === 'trig')?.writable).toBe(true);
+    expect(list.components.find((component) => component.typeCode === 'mapi')?.writable).toBe(false);
+    expect(list.components.find((component) => component.typeCode === 'attr')?.writable).toBe(false);
   });
 
   it('passes through an unrecognised type code rather than dropping it', () => {

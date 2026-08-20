@@ -17,9 +17,10 @@
  *
  * Two structural facts drive everything here:
  *
- *  - `<Root>` and each `<Element>` hold `<Item>` references, so the tree is built by
- *    following ids rather than by nesting. An element can therefore be referenced from
- *    more than one place, and a cycle is possible in malformed data.
+ *  - `<Root>` uses `<Item>` references. Elements use relation-specific tags such as
+ *    `<Item>`, `<Event>`, `<Action>`, `<Parameter>`, and `<FunctionCall>`. The tree is
+ *    built by following their ids rather than by nesting. An element can be referenced
+ *    from more than one place, and a cycle is possible in malformed data.
  *  - **Names are not in this file.** They live in `TriggerStrings.txt` as
  *    `<Type>/Name/<Id>` — `Category/Name/148F844D=varibles`. An id alone is meaningless
  *    to a human, so anything user-facing has to join the two.
@@ -27,8 +28,8 @@
  * Element types observed: Category, Comment, CustomScript, FunctionCall, FunctionDef,
  * Param, ParamDef, Trigger, Variable. The set is treated as open.
  *
- * **Read-only.** PLAN.md §21 stages trigger mutation deliberately and warns against
- * generating trigger XML by guessing undocumented ids. Nothing here writes.
+ * Mutation clones or removes complete editor-authored subgraphs. It never invents native
+ * function, action, event, parameter, or preset identifiers.
  */
 
 import { SC2Error } from '../errors.js';
@@ -36,11 +37,23 @@ import { attributeValue, childElements, parseXml, type XmlElement, type XmlSpan 
 
 export const TRIGGERS_FILENAME = 'Triggers';
 
+export interface TriggerReference {
+  /** Relation tag in the XML, such as Item, Event, Action, or Parameter. */
+  readonly tag: string;
+  readonly type: string;
+  readonly id: string;
+  /** External library references are not edges in the document-owned graph. */
+  readonly library: string | null;
+  readonly span: XmlSpan;
+}
+
 export interface TriggerElement {
   readonly id: string;
   readonly type: string;
   /** Ids of the children this element lists, in order. */
   readonly childIds: readonly string[];
+  /** Every direct id-bearing field, including external library references. */
+  readonly references: readonly TriggerReference[];
   /** Direct child element names other than `<Item>`, e.g. `VariableType`. For orientation. */
   readonly detailFields: readonly string[];
   readonly span: XmlSpan;
@@ -50,6 +63,7 @@ export interface TriggerElement {
 export interface TriggerData {
   /** Top-level ids, in declaration order. */
   readonly rootIds: readonly string[];
+  readonly rootReferences: readonly TriggerReference[];
   readonly elements: ReadonlyMap<string, TriggerElement>;
   /** Ids referenced by an `<Item>` but never declared as an `<Element>`. */
   readonly danglingIds: readonly string[];
@@ -65,10 +79,26 @@ function lineAt(source: string, offset: number): number {
   return line;
 }
 
-function readItems(element: XmlElement): string[] {
-  return childElements(element, 'Item')
-    .map((item) => attributeValue(item, 'Id'))
-    .filter((id): id is string => id !== undefined);
+/** `ValueId` is scalar map/region data. Other id-bearing children are graph references. */
+export function isTriggerReferenceElement(element: XmlElement): boolean {
+  return element.name !== 'ValueId' && attributeValue(element, 'Id') !== undefined;
+}
+
+function readReferences(element: XmlElement): TriggerReference[] {
+  return childElements(element).flatMap((child) => {
+    if (!isTriggerReferenceElement(child)) return [];
+    const id = attributeValue(child, 'Id');
+    if (id === undefined || id === '') return [];
+    return [
+      {
+        tag: child.name,
+        type: attributeValue(child, 'Type') ?? 'Unknown',
+        id,
+        library: attributeValue(child, 'Library') ?? null,
+        span: child.span,
+      },
+    ];
+  });
 }
 
 export function parseTriggerData(source: string): TriggerData {
@@ -81,13 +111,19 @@ export function parseTriggerData(source: string): TriggerData {
     });
   }
 
-  const rootIds: string[] = [];
+  let rootReferences: TriggerReference[] | null = null;
   const elements = new Map<string, TriggerElement>();
   const countsByType = new Map<string, number>();
 
   for (const child of childElements(document.root)) {
     if (child.name === 'Root') {
-      rootIds.push(...readItems(child));
+      if (rootReferences !== null) {
+        throw new SC2Error('SC2_PARSE_ERROR', `${TRIGGERS_FILENAME} contains more than one <Root> element.`, {
+          path: TRIGGERS_FILENAME,
+          recoverable: false,
+        });
+      }
+      rootReferences = readReferences(child).filter((reference) => reference.library === null);
       continue;
     }
     if (child.name !== 'Element') continue;
@@ -95,21 +131,42 @@ export function parseTriggerData(source: string): TriggerData {
     const id = attributeValue(child, 'Id');
     const type = attributeValue(child, 'Type') ?? 'Unknown';
     if (id === undefined) continue;
+    if (elements.has(id)) {
+      throw new SC2Error('SC2_PARSE_ERROR', `${TRIGGERS_FILENAME} declares element id ${id} more than once.`, {
+        path: TRIGGERS_FILENAME,
+        recoverable: false,
+      });
+    }
+
+    const references = readReferences(child);
 
     const detailFields = [
-      ...new Set(childElements(child).filter((field) => field.name !== 'Item').map((field) => field.name)),
+      ...new Set(
+        childElements(child)
+          .filter((field) => !isTriggerReferenceElement(field) || attributeValue(field, 'Library') !== undefined)
+          .map((field) => field.name),
+      ),
     ];
 
     elements.set(id, {
       id,
       type,
-      childIds: readItems(child),
+      childIds: references.filter((reference) => reference.library === null).map((reference) => reference.id),
+      references,
       detailFields,
       span: child.span,
       line: lineAt(document.source, child.span.start),
     });
     countsByType.set(type, (countsByType.get(type) ?? 0) + 1);
   }
+
+  if (rootReferences === null) {
+    throw new SC2Error('SC2_PARSE_ERROR', `${TRIGGERS_FILENAME} has no <Root> element.`, {
+      path: TRIGGERS_FILENAME,
+      recoverable: false,
+    });
+  }
+  const rootIds = rootReferences.map((reference) => reference.id);
 
   // An `<Item>` naming an id nothing declares is a real authoring defect, and the kind of
   // thing a listing would otherwise silently drop.
@@ -119,7 +176,7 @@ export function parseTriggerData(source: string): TriggerData {
     for (const childId of element.childIds) if (!elements.has(childId)) dangling.add(childId);
   }
 
-  return { rootIds, elements, danglingIds: [...dangling].sort(), countsByType };
+  return { rootIds, rootReferences, elements, danglingIds: [...dangling].sort(), countsByType };
 }
 
 export interface TriggerTreeNode {

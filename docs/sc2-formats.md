@@ -213,11 +213,12 @@ conventions have **not** yet been checked byte-for-byte; do that before writing 
 PLAN.md §21 and §27 both anticipate binary reverse engineering here. Four of these are
 plain XML, which the file listing hides because they have no extension:
 
-**`Triggers`** — `<TriggerData>` with `<Root>` and flat `<Element Type Id>` declarations.
-Elements reference each other by id rather than nesting, so the structure is a graph and a
-walker must guard against repeats. Names are **not** in this file; they live in
-`TriggerStrings.txt` as `<Type>/Name/<Id>`. Element types seen: Category, Comment,
-CustomScript, FunctionCall, FunctionDef, Param, ParamDef, Trigger, Variable.
+**`Triggers`** uses `<TriggerData>` with `<Root>` and flat `<Element Type Id>` declarations.
+The root uses `<Item>` references. Element edges use relation-specific tags such as
+`<Item>`, `<Event>`, `<Action>`, `<Parameter>`, and `<FunctionCall>`. A `Library` attribute
+marks an external native definition rather than a document-owned graph edge. Names are not
+in this file; they live in `TriggerStrings.txt` as `<Type>/Name/<Id>`. Lossless clone and
+delete operations work on complete local subgraphs and preserve shared nodes.
 
 **`Objects`** — `<PlacedObjects Version="27">` holding `<ObjectUnit>`, `<ObjectDoodad>`,
 and `<ObjectPoint>`, each with `Id`, `Position="x,y,z"`, `Rotation`, `Scale`, `Type`, and

@@ -23,6 +23,7 @@ const ReadWriteSchema = z.object({ read: z.boolean(), write: z.boolean() });
 
 const CapabilitiesSchema = z.object({
   workspace: ReadWriteSchema,
+  components: ReadWriteSchema,
   mpq: ReadWriteSchema,
   gamedata: ReadWriteSchema.extend({ inheritance: z.boolean() }),
   galaxy: ReadWriteSchema.extend({ typecheck: z.boolean() }),
@@ -106,6 +107,11 @@ function limitationsFor(context: ServerContext): string[] {
   if (!capabilities.gamedata.read) {
     notes.push('GameData catalogs are not parsed yet; there are no catalog search or edit tools.');
   }
+  if (!capabilities.components.read) {
+    notes.push('The component inventory cannot be parsed in this build.');
+  } else if (!capabilities.components.write) {
+    notes.push('Component declarations can be inspected but not changed in this build.');
+  }
   if (!capabilities.galaxy.read) {
     notes.push('Galaxy scripts are not parsed yet; there are no symbol or diagnostic tools.');
   }
@@ -114,13 +120,7 @@ function limitationsFor(context: ServerContext): string[] {
       'Galaxy diagnostics are syntax-only; type checking is unavailable because the game native declarations are not loaded.',
     );
   }
-  if (!capabilities.triggers.read) {
-    notes.push('Trigger data is not parsed in this build.');
-  } else if (!capabilities.triggers.write) {
-    notes.push(
-      'Trigger structure is read-only. Display names can be renamed safely, but actions, events, conditions, and graph nodes cannot be created or rewired.',
-    );
-  }
+  if (!capabilities.triggers.read) notes.push('Trigger data is not parsed in this build.');
   if (!capabilities.layout.read) {
     notes.push('SC2Layout files are not parsed or editable in this build.');
   } else if (!capabilities.layout.write) {

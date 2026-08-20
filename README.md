@@ -16,16 +16,16 @@ answer for a running build. As of now:
 | Subsystem | Read | Write | Notes |
 |---|---|---|---|
 | Workspace staging | ✅ | ✅ | Unpacked documents, plus packed documents when the MPQ helper is available |
-| Component inventory | ✅ | ⚠️ | `ComponentList` is read-only; `DocumentInfo` fields and the dependency chain are writable |
+| Component inventory | ✅ | ✅ | Resolve component files; add, update, or remove lossless `ComponentList` declarations; edit `DocumentInfo` and dependencies |
 | GameData catalogs | ✅ | ✅ | Search, inspect, resolve inheritance, find references, patch/clone/create/delete. Local dependencies load read-only |
 | MPQ archives (`.SC2Map`, `.SC2Mod`) | ✅ | ✅ | Byte-identical round trips on real ladder maps, and maps packed here open in the editor — see [docs/native-helper.md](docs/native-helper.md) |
 | Galaxy scripts | ✅ | ✅ | Parse, symbols, syntax diagnostics, safe text patching. **No type checking** — needs the game's natives. Requires the vendored toolkit to be built |
-| Triggers | ✅ | ⚠️ | Structure, names, search. Renaming only — structural editing deliberately not implemented |
+| Triggers | ✅ | ✅ | Full local reference graph, names, search, rename, graph-safe clone, and shared-node-aware delete |
 | Localization | ✅ | ✅ | Text tables, preserving BOM and CRLF exactly |
 | SC2Layout | ✅ | ✅ | List, read, diagnose, search, create, and losslessly patch layout elements |
 | Placed objects / regions | ✅ | ✅ | Both are XML, not binary. Place, move, delete — round-tripped through the editor. Terrain height is not consulted |
 | Terrain | ✅ | ✅ | Typed height, texture, pathing, and cliff reads/writes, synchronized-file updates, validation, and bounded raw component access. See [docs/terrain.md](docs/terrain.md) |
-| Editor/test launch | ✅ | n/a | Opens documents in the Galaxy Editor, launches packed maps or staged workspace maps through the installed client, and reports editor/game logs |
+| Editor/test launch | ✅ | ✅ | Opens documents in the Galaxy Editor; writes bounded `Maps\Test` staging; launches packed or workspace maps; reports editor/game logs |
 
 Why the gaps are where they are, and what "⚠️" means in each row:
 [docs/capabilities.md](docs/capabilities.md).
@@ -60,6 +60,9 @@ that specific run.
 | `sc2_get_document_summary` | yes | Kind, counts, components, dependencies, diagnostics, known gaps |
 | `sc2_list_workspaces` | yes | Recover a `workspace_id` after a reconnect |
 | `sc2_list_components` | yes | Parse `ComponentList.SC2Components`; resolve each entry to real files |
+| `sc2_add_component` | no | Add a lossless component declaration, normally for files already in the workspace |
+| `sc2_update_component` | no | Change a component type, logical path, or locale |
+| `sc2_remove_component` | no | Remove a declaration while preserving its staged files |
 | `sc2_get_document_info` | yes | Name, author, mod type, icon, screenshots, dependencies |
 | `sc2_get_dependencies` | yes | Dependency chain in resolution order |
 | `sc2_list_component_types` | yes | Reference table of component type codes |
@@ -100,6 +103,8 @@ that specific run.
 | `sc2_get_trigger` | yes | One element: type, name, contents, referrers, raw XML |
 | `sc2_search_triggers` | yes | Find trigger elements by name |
 | `sc2_rename_trigger` | no | Rename an element (edits TriggerStrings only) |
+| `sc2_clone_trigger` | no | Clone an editor-authored subgraph and remap every local id |
+| `sc2_delete_trigger` | no | Detach a branch; remove only nodes with no remaining incoming path |
 | `sc2_list_placed_objects` | yes | Units, doodads, and points on the map |
 | `sc2_place_object` | no | Place a unit, doodad, or point with the next free id |
 | `sc2_update_object` | no | Move, rotate, or rescale a placed object |

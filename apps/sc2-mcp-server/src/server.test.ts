@@ -22,6 +22,23 @@ import { createMcpServer } from './server.js';
 
 const DOCUMENT_FIXTURE = MINIMAL_DOCUMENT;
 
+const TRIGGER_FIXTURE =
+  '<?xml version="1.0" encoding="utf-8"?>\r\n' +
+  '<TriggerData>\r\n' +
+  '    <Root>\r\n' +
+  '        <Item Type="Category" Id="AAAAAAAA"/>\r\n' +
+  '    </Root>\r\n' +
+  '    <Element Type="Category" Id="AAAAAAAA">\r\n' +
+  '        <Item Type="Trigger" Id="BBBBBBBB"/>\r\n' +
+  '    </Element>\r\n' +
+  '    <Element Type="Trigger" Id="BBBBBBBB">\r\n' +
+  '        <Event Type="FunctionCall" Id="CCCCCCCC"/>\r\n' +
+  '    </Element>\r\n' +
+  '    <Element Type="FunctionCall" Id="CCCCCCCC">\r\n' +
+  '        <FunctionDef Type="FunctionDef" Library="Ntve" Id="18377668"/>\r\n' +
+  '    </Element>\r\n' +
+  '</TriggerData>\r\n';
+
 const TERRAIN_DESCRIPTOR =
   '<?xml version="1.0" encoding="utf-8"?>\r\n' +
   '<terrain version="115">\r\n' +
@@ -169,11 +186,13 @@ describe('MCP server', () => {
     const names = tools.map((tool) => tool.name).sort();
 
     expect(names).toEqual([
+      'sc2_add_component',
       'sc2_add_dependency',
       'sc2_apply_galaxy_patch',
       'sc2_apply_layout_patch',
       'sc2_check_shared_object',
       'sc2_clone_catalog_object',
+      'sc2_clone_trigger',
       'sc2_commit_document',
       'sc2_copy_text_key',
       'sc2_create_catalog_object',
@@ -186,6 +205,7 @@ describe('MCP server', () => {
       'sc2_delete_object',
       'sc2_delete_region',
       'sc2_delete_text_key',
+      'sc2_delete_trigger',
       'sc2_detect_installations',
       'sc2_diff_workspace',
       'sc2_discard_workspace',
@@ -230,6 +250,7 @@ describe('MCP server', () => {
       'sc2_patch_terrain_component',
       'sc2_place_object',
       'sc2_read_file',
+      'sc2_remove_component',
       'sc2_remove_dependency',
       'sc2_rename_trigger',
       'sc2_resolve_catalog_object',
@@ -248,6 +269,7 @@ describe('MCP server', () => {
       'sc2_set_text_value',
       'sc2_set_unit_weapon_damage',
       'sc2_test_document',
+      'sc2_update_component',
       'sc2_update_object',
       'sc2_update_region',
       'sc2_validate_document',
@@ -272,6 +294,9 @@ describe('MCP server', () => {
     expect(byName.get('sc2_read_file')?.annotations?.readOnlyHint).toBe(true);
     expect(byName.get('sc2_test_document')?.annotations?.readOnlyHint).toBe(false);
     expect(byName.get('sc2_get_last_test_log')?.annotations?.readOnlyHint).toBe(true);
+    expect(byName.get('sc2_add_component')?.annotations?.readOnlyHint).toBe(false);
+    expect(byName.get('sc2_clone_trigger')?.annotations?.readOnlyHint).toBe(false);
+    expect(byName.get('sc2_delete_trigger')?.annotations?.destructiveHint).toBe(true);
 
     // Restoring a snapshot discards every later change, so it is destructive; taking one
     // writes files but can never lose anything, so it is not.
@@ -295,6 +320,7 @@ describe('MCP server', () => {
     const capabilities = outcome.structured['capabilities'] as Record<string, { read: boolean; write: boolean }>;
     // Workspace staging and catalog reading work in this build...
     expect(capabilities['workspace']).toEqual({ read: true, write: true });
+    expect(capabilities['components']).toEqual({ read: true, write: true });
     expect(capabilities['gamedata']).toEqual({ read: true, write: true, inheritance: true });
     // ...and nothing that depends on an unbuilt backend claims to.
     expect(capabilities['mpq']).toEqual({ read: false, write: false });
@@ -303,7 +329,7 @@ describe('MCP server', () => {
     // Objects and Regions are plain XML and need no external backend, so they are writable
     // wherever the server runs.
     expect(capabilities['objects']).toEqual({ read: true, write: true });
-    expect(capabilities['triggers']).toEqual({ read: true, write: false });
+    expect(capabilities['triggers']).toEqual({ read: true, write: true });
     expect(capabilities['localization']).toEqual({ read: true, write: true });
     // Galaxy is implemented but gated on the vendored toolkit, which this harness skips.
     expect(capabilities['galaxy']).toEqual({ read: false, write: false, typecheck: false });
@@ -314,7 +340,6 @@ describe('MCP server', () => {
         expect.stringContaining('Packed'),
         expect.stringContaining('Galaxy scripts'),
         expect.stringContaining('type checking'),
-        expect.stringContaining('Trigger structure'),
         expect.stringContaining('Automated in-game testing'),
       ]),
     );
@@ -591,8 +616,89 @@ describe('MCP server', () => {
     const text = components.find((component) => component.typeCode === 'text');
     expect(text?.resolvedPaths).toEqual(['enUS.SC2Data/LocalizedData/GameStrings.txt']);
 
-    // PLAN.md §11: never claim write support just because a component can be read.
-    expect(components.every((component) => !component.writable)).toBe(true);
+    expect(gameData?.writable).toBe(true);
+    expect(components.find((component) => component.typeCode === 'info')?.writable).toBe(true);
+  });
+
+  it('adds, updates, and removes component declarations through MCP', async () => {
+    const opened = await callTool(harness.client, 'sc2_open_document', { source_path: harness.sourceDir });
+    const workspaceId = (opened.structured['workspace'] as Record<string, unknown>)['id'] as string;
+
+    const added = await callTool(harness.client, 'sc2_add_component', {
+      workspace_id: workspaceId,
+      type_code: 'test',
+      path: 'Base.SC2Data/LibTest.galaxy',
+      dry_run: false,
+    });
+    expect(added.isError).toBe(false);
+    expect((added.structured['component'] as Record<string, unknown>)['exists']).toBe(true);
+
+    const updated = await callTool(harness.client, 'sc2_update_component', {
+      workspace_id: workspaceId,
+      type_code: 'test',
+      new_path: 'Base.SC2Data/GameData/UnitData.xml',
+      dry_run: false,
+    });
+    expect(updated.isError).toBe(false);
+    expect((updated.structured['component'] as Record<string, unknown>)['path']).toBe(
+      'Base.SC2Data/GameData/UnitData.xml',
+    );
+
+    const removed = await callTool(harness.client, 'sc2_remove_component', {
+      workspace_id: workspaceId,
+      type_code: 'test',
+      dry_run: false,
+    });
+    expect(removed.isError).toBe(false);
+    const listed = await callTool(harness.client, 'sc2_list_components', { workspace_id: workspaceId });
+    expect((listed.structured['components'] as { typeCode: string }[]).some((entry) => entry.typeCode === 'test')).toBe(false);
+  });
+
+  it('clones and deletes complete trigger subgraphs through MCP', async () => {
+    await writeTree(harness.sourceDir, {
+      Triggers: TRIGGER_FIXTURE,
+      'enUS.SC2Data/LocalizedData/TriggerStrings.txt':
+        'Category/Name/AAAAAAAA=Folder\r\nTrigger/Name/BBBBBBBB=Original\r\n',
+      'ComponentList.SC2Components': String(DOCUMENT_FIXTURE['ComponentList.SC2Components']).replace(
+        '</Components>',
+        '    <DataComponent Type="trig">Triggers</DataComponent>\r\n</Components>',
+      ),
+    });
+    const opened = await callTool(harness.client, 'sc2_open_document', { source_path: harness.sourceDir });
+    const workspaceId = (opened.structured['workspace'] as Record<string, unknown>)['id'] as string;
+
+    const listed = await callTool(harness.client, 'sc2_list_triggers', { workspace_id: workspaceId, max_depth: 5 });
+    expect(listed.isError).toBe(false);
+    expect((listed.structured['tree'] as { children: unknown[] }[])[0]?.children).toHaveLength(1);
+
+    const cloned = await callTool(harness.client, 'sc2_clone_trigger', {
+      workspace_id: workspaceId,
+      source_id: 'BBBBBBBB',
+      parent_id: 'AAAAAAAA',
+      new_name: 'Cloned trigger',
+      dry_run: false,
+    });
+    expect(cloned.isError).toBe(false);
+    const clonedRootId = cloned.structured['clonedRootId'] as string;
+    const clone = await callTool(harness.client, 'sc2_get_trigger', {
+      workspace_id: workspaceId,
+      id: clonedRootId,
+    });
+    expect(clone.isError).toBe(false);
+    expect(clone.structured['childIds']).toHaveLength(1);
+    expect(clone.structured['name']).toBe('Cloned trigger');
+
+    const deleted = await callTool(harness.client, 'sc2_delete_trigger', {
+      workspace_id: workspaceId,
+      id: clonedRootId,
+      parent_id: 'AAAAAAAA',
+      dry_run: false,
+    });
+    expect(deleted.isError).toBe(false);
+    expect((deleted.structured['removedIds'] as string[]).length).toBe(2);
+    expect(
+      (await callTool(harness.client, 'sc2_get_trigger', { workspace_id: workspaceId, id: clonedRootId })).isError,
+    ).toBe(true);
   });
 
   it('reads DocumentInfo and its dependency chain', async () => {

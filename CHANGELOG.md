@@ -14,7 +14,8 @@ build-plan phase they complete.
   containment checks, so symlinks cannot escape. Archive paths are rejected rather than
   sanitised.
 - **Component inventory** (Phase 4). `ComponentList.SC2Components` and `DocumentInfo`,
-  with each component resolved to the files it actually covers.
+  with each component resolved to the files it covers. Component declarations can be
+  added, updated, and removed without reserializing untouched XML.
 - **GameData catalogs** (Phases 6, 8). Search, inheritance resolution with per-value
   provenance, reference finding, and field-level mutation by addressable path.
 - **Lossless XML editing and transactions** (Phases 7). Byte-range splicing that leaves
@@ -26,7 +27,8 @@ build-plan phase they complete.
   search, valid file creation, and targeted lossless XML patches.
 - **Galaxy scripts** (Phase 9). Parsing, symbols, syntax diagnostics, and guarded text
   patching via the vendored toolkit.
-- **Triggers** (Phase 11). Structure and names, read-only apart from renaming.
+- **Triggers** (Phase 11). The complete local reference graph, localized names, renaming,
+  complete-subgraph cloning with id remapping, and shared-node-aware branch deletion.
 - **Placed objects and regions** (Phase 15). Read, place/create, move, rename, rescale,
   and delete operations, validated by reopening the packed result in the Galaxy Editor.
 - **Terrain codecs and mutation** (Phase 16). Descriptor, render and synchronized
@@ -52,8 +54,9 @@ build-plan phase they complete.
 
 - **No Galaxy type checking.** Diagnostics are syntax-only; see
   [docs/galaxy.md](docs/galaxy.md).
-- **No structural trigger editing.** Trigger names can be changed, but graph nodes and
-  undocumented editor ids are not generated.
+- **No from-scratch native trigger builders.** Existing editor-authored trigger graphs can
+  be cloned and deleted safely, but the server does not invent undocumented native action,
+  event, parameter, or preset ids.
 - **No high-level terrain authoring.** Primitive vertex and cell edits are supported, but
   brushes, ramp construction, procedural terrain, and semantic water-body creation remain
   roadmap work. Water and other advanced components have bounded validated raw access.

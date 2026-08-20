@@ -18,12 +18,12 @@ the sidecar binary is not there.
 | Component | Read | Write | Notes |
 |---|---|---|---|
 | Workspace staging | ✅ | ✅ | Unpacked document directories. Packed archives need the MPQ helper. |
-| `ComponentList.SC2Components` | ✅ | ❌ | Parsed and resolved to real files. |
+| `ComponentList.SC2Components` | ✅ | ✅ | Parsed and resolved; declarations can be added, updated, and removed losslessly. |
 | `DocumentInfo` | ✅ | ✅ | Dependency chain in resolution order; add/remove dependencies and set fields. |
 | GameData catalogs | ✅ | ✅ | Search, inheritance, references, patch/clone/create/delete. |
 | Localized text | ✅ | ✅ | BOM and CRLF preserved exactly. |
 | Galaxy scripts | ✅ | ✅ | Syntax only — see below. Needs the vendored toolkit built. |
-| Triggers | ✅ | ⚠️ | Structure and names readable; **renaming only**. |
+| Triggers | ✅ | ✅ | Full local graph plus rename, complete-subgraph clone, and shared-node-aware delete. |
 | SC2Layout | ✅ | ✅ | List, read, structurally diagnose, search, create, and losslessly patch. |
 | Placed objects (`Objects`) | ✅ | ✅ | XML, not binary. Place, move, delete; terrain height is not consulted. |
 | Regions | ✅ | ✅ | XML, not binary. Create, move, rename, delete. |
@@ -47,6 +47,13 @@ added objects by name; after those were fixed the same map reopened with no aler
 That is the editor reading this build's output as a real document, which is the evidence
 the gate was waiting for. See [native-helper.md](native-helper.md).
 
+**Component inventory writes.** The three component mutation tools splice `DataComponent`
+entries in place and preserve the file's CRLF and no-trailing-newline convention. Add and
+update refuse an unresolved logical path unless the caller explicitly allows a forward
+declaration. Remove deletes only the declaration, never the staged component files. A real
+packed map with a changed `DocumentInfo` declaration was repacked, reopened through MCP,
+loaded in Galaxy Editor, and launched into gameplay.
+
 **Galaxy type checking.** The vendored `sc2-galaxy-lang` ships a `TypeChecker`, and it is
 deliberately unused. A useful one needs the game's native declarations — `natives.galaxy`
 and the trigger libraries — which live in the StarCraft II installation rather than in a
@@ -55,12 +62,17 @@ output would be a wall of false errors. `capabilities.galaxy.typecheck` is there
 `false` and every tool description says "syntax only", so a clean diagnostics result is
 not misread as "this compiles".
 
-**Trigger structural editing.** Trigger data is readable XML, so the temptation is real.
-PLAN.md §21 warns against generating trigger XML by guessing undocumented ids, and the
-element graph is full of them: `FunctionCall`, `Param`, `ParamDef` entries reference
-editor-internal identifiers whose allocation rules are not documented anywhere reliable.
-Renaming is the one write, and it is safe precisely because it edits `TriggerStrings.txt`
-rather than the trigger data.
+**Trigger writes.** The parser follows every document-owned relation, including `Item`,
+`Event`, `Action`, `Parameter`, and `FunctionCall`. Library-qualified native references
+remain external. `sc2_clone_trigger` copies a complete editor-authored subgraph, allocates
+new eight-digit hexadecimal ids, remaps every local edge, and copies its localized names.
+`sc2_delete_trigger` removes the selected edge and prunes only nodes with no remaining
+incoming path. Shared nodes stay intact. The server still refuses to construct a new native
+action or event from an undocumented identifier; cloning preserves the editor's original
+schema instead. The installed-client check cloned an 18-element trigger subgraph in a real
+packed map, repacked it, reopened it through MCP, loaded it in Galaxy Editor, and reached
+live gameplay. The trigger validator reported no errors or warnings before and after the
+archive round trip.
 
 **Placed objects and regions.** PLAN.md §27 required editor round-trip validation before
 any write. A real map had a region and unit added through these tools, was repacked, and

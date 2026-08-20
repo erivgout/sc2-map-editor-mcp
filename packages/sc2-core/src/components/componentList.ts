@@ -63,10 +63,7 @@ export interface ComponentDescriptor {
   readonly exists: boolean;
   /** Paths in the staged tree this component resolves to. Empty when nothing matched. */
   readonly resolvedPaths: readonly string[];
-  /**
-   * Whether this build can *write* the component. Always false for now: reading a file
-   * is not the same as being able to serialise it safely (PLAN.md §11).
-   */
+  /** Whether this build has a writer for the component's contents. */
   readonly writable: boolean;
   /** Name of the parser that understands this component, or `null` if none does yet. */
   readonly parser: string | null;
@@ -82,8 +79,18 @@ export interface ComponentList {
 
 /** Components this build has a reader for. Extended as phases land. */
 const PARSERS: Readonly<Record<string, string>> = Object.freeze({
+  gada: 'catalog',
+  text: 'textTable',
   info: 'documentInfo',
+  trig: 'triggerData',
+  terr: 'terrain',
+  plob: 'placedObjects',
+  regi: 'regions',
+  layo: 'layout',
 });
+
+/** Components with a tested content writer. ComponentList entries themselves are also mutable. */
+const WRITERS = new Set(['gada', 'text', 'info', 'trig', 'terr', 'plob', 'regi', 'layo']);
 
 /**
  * Resolves a component entry to concrete paths in the staged tree.
@@ -149,17 +156,17 @@ export function parseComponentList(source: string, stagedPaths: readonly string[
     const componentPath = textContent(element).trim();
     const locale = attributeValue(element, 'Locale') ?? null;
     const resolvedPaths = resolveComponentPaths({ typeCode, path: componentPath, locale }, stagedPaths);
+    const typeKey = typeCode.toLowerCase();
 
     components.push({
       typeCode,
-      description: KNOWN_COMPONENT_TYPES[typeCode] ?? null,
+      description: KNOWN_COMPONENT_TYPES[typeKey] ?? null,
       path: componentPath,
       locale,
       exists: resolvedPaths.length > 0,
       resolvedPaths,
-      // Writing is a separate capability from reading (PLAN.md §11); nothing is writable yet.
-      writable: false,
-      parser: PARSERS[typeCode] ?? null,
+      writable: WRITERS.has(typeKey),
+      parser: PARSERS[typeKey] ?? null,
     });
   }
 

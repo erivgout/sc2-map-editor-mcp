@@ -17,6 +17,7 @@ export interface ReadWriteCapability {
 
 export interface ServerCapabilities {
   workspace: ReadWriteCapability;
+  components: ReadWriteCapability;
   mpq: ReadWriteCapability;
   gamedata: ReadWriteCapability & { inheritance: boolean };
   galaxy: ReadWriteCapability & { typecheck: boolean };
@@ -35,6 +36,7 @@ export interface ServerCapabilities {
  */
 export const NO_CAPABILITIES: ServerCapabilities = Object.freeze({
   workspace: { read: false, write: false },
+  components: { read: false, write: false },
   mpq: { read: false, write: false },
   gamedata: { read: false, write: false, inheritance: false },
   galaxy: { read: false, write: false, typecheck: false },
@@ -56,6 +58,8 @@ export const NO_CAPABILITIES: ServerCapabilities = Object.freeze({
 export const IMPLEMENTED: ServerCapabilities = Object.freeze({
   // Phase 2: staging, path guard, open/summary/discard for directory sources.
   workspace: { read: true, write: true },
+  // ComponentList entries can be added, updated, and removed through lossless spans.
+  components: { read: true, write: true },
   // Phase 3, gated at runtime on the sidecar being present.
   //
   // Six real ladder maps extract, repack, verify, and re-extract byte-identically (every
@@ -74,11 +78,10 @@ export const IMPLEMENTED: ServerCapabilities = Object.freeze({
   // patching work; `typecheck` stays false because a real checker needs the game's
   // native declarations, which are not in a map — see packages/sc2-core/src/galaxy.
   galaxy: { read: true, write: true, typecheck: false },
-  // Phase 11. Read-only structure, plus renaming — which edits TriggerStrings.txt, not
-  // the trigger data, so it cannot corrupt the trigger graph. Structural trigger editing
-  // stays unimplemented: PLAN.md §21 warns against generating trigger XML by guessing
-  // undocumented ids, and nothing here does.
-  triggers: { read: true, write: false },
+  // Phase 11. The full local reference graph is parsed. Clone and delete operations work
+  // on complete editor-authored subgraphs, remap local ids, preserve native library ids,
+  // and update TriggerStrings in the same transaction.
+  triggers: { read: true, write: true },
   // Phase 10. Text tables are line-oriented and reference nothing, so they are the
   // lowest-risk writable component in the document.
   localization: { read: true, write: true },
@@ -125,6 +128,7 @@ export function deriveCapabilities(inputs: CapabilityInputs): ServerCapabilities
   const { mpqHelperAvailable, editorAvailable, runtimeLauncherAvailable, toolkitAvailable } = inputs;
   return {
     workspace: { ...IMPLEMENTED.workspace },
+    components: { ...IMPLEMENTED.components },
     mpq: {
       read: IMPLEMENTED.mpq.read && mpqHelperAvailable,
       write: IMPLEMENTED.mpq.write && mpqHelperAvailable,

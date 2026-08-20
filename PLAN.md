@@ -1885,10 +1885,11 @@ Example:
 ```json
 {
   "workspace": { "read": true, "write": true },
+  "components": { "read": true, "write": true },
   "mpq": { "read": true, "write": true },
   "gamedata": { "read": true, "write": true, "inheritance": true },
   "galaxy": { "read": true, "write": true, "typecheck": false },
-  "triggers": { "read": true, "write": false },
+  "triggers": { "read": true, "write": true },
   "localization": { "read": true, "write": true },
   "layout": { "read": true, "write": true },
   "objects": { "read": true, "write": true },
@@ -1991,7 +1992,7 @@ Multiple self-authored `.SC2Map` and `.SC2Mod` files survive extract/repack and 
 
 ### Tasks
 
-- [ ] ComponentList parser.
+- [x] ComponentList parser and lossless declaration mutation.
 - [ ] file listing.
 - [ ] safe file reading.
 - [ ] raw text search.
@@ -2112,10 +2113,10 @@ New GameData objects can receive correct user-facing names/tooltips.
 
 ### Tasks
 
-- [ ] safe trigger metadata edits.
-- [ ] clone trigger nodes.
+- [x] safe trigger metadata edits.
+- [x] clone and delete complete editor-authored trigger subgraphs.
 - [ ] schema-aware action/event builders.
-- [ ] editor validation corpus.
+- [x] editor validation corpus for cloned trigger graphs.
 
 ### Exit criteria
 

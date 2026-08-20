@@ -321,8 +321,8 @@ export class WorkspaceService {
       components,
       documentInfo,
       diagnostics,
-      // Kept explicit and honest: these are Phase 5+ (PLAN.md §42).
-      notYetImplemented: ['catalogCounts', 'galaxyScripts', 'triggers'],
+      // These are available through focused tools but are not folded into this compact summary.
+      notYetImplemented: ['catalogCounts', 'galaxyScripts'],
     };
   }
 

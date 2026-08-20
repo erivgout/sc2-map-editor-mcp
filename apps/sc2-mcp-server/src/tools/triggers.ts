@@ -1,11 +1,8 @@
 /**
  * Trigger tools (PLAN.md §21, §42 Phase 11).
  *
- * **Read-only, plus renaming.** PLAN.md §21 stages trigger mutation deliberately and says
- * not to generate trigger XML by guessing undocumented ids. This build does neither: it
- * reads the structure, and the one thing it writes is a display name — which lives in
- * `TriggerStrings.txt`, not in the trigger data at all, so renaming cannot corrupt the
- * trigger graph.
+ * Structural writes clone and delete complete editor-authored subgraphs. Native function,
+ * event, action, parameter, and preset identifiers are preserved rather than invented.
  */
 
 import { readFile } from 'node:fs/promises';
@@ -16,9 +13,12 @@ import {
   TRIGGERS_FILENAME,
   applyTextEdits,
   buildTriggerTree,
+  cloneTriggerSubgraph,
+  deleteTriggerSubgraph,
   parseTriggerData,
   triggerNameKey,
   type ChangeResult,
+  type FileOperation,
   type TriggerTreeNode,
 } from '@sc2mcp/core';
 import { z } from 'zod';
@@ -29,7 +29,7 @@ import { ok, toolHandler } from '../mcp-errors.js';
 const WorkspaceIdSchema = z.string().min(1).describe('Workspace id returned by sc2_open_document.');
 
 const READ_ONLY_NOTE =
-  'Trigger structure is read-only in this build. Renaming works because names live in TriggerStrings.txt rather than in the trigger data.';
+  'Trigger structure supports lossless clone and delete operations on editor-authored subgraphs. Schema-specific action and event construction remains intentionally unavailable.';
 
 const TreeNodeSchema: z.ZodType = z.lazy(() =>
   z.object({
@@ -41,6 +41,34 @@ const TreeNodeSchema: z.ZodType = z.lazy(() =>
     children: z.array(TreeNodeSchema),
   }),
 );
+
+const ChangeResultSchema = z.object({
+  changeId: z.string(),
+  revisionBefore: z.number().int(),
+  revisionAfter: z.number().int(),
+  dryRun: z.boolean(),
+  filesChanged: z.array(
+    z.object({
+      path: z.string(),
+      beforeHash: z.string().nullable(),
+      afterHash: z.string().nullable(),
+      addedLines: z.number().int(),
+      removedLines: z.number().int(),
+      diff: z.string().nullable(),
+    }),
+  ),
+  summary: z.array(z.string()),
+  diagnostics: z.array(
+    z.object({
+      severity: z.enum(['error', 'warning', 'info']),
+      code: z.string(),
+      message: z.string(),
+      path: z.string().optional(),
+    }),
+  ),
+  requiresRepack: z.boolean(),
+  snapshotId: z.string().nullable(),
+});
 
 function renderTree(nodes: readonly TriggerTreeNode[], indent = ''): string[] {
   return nodes.flatMap((node) => [
@@ -54,6 +82,7 @@ export function registerTriggerTools(server: McpServer, context: ServerContext):
 
   /** Reads and parses the trigger component, with the name table joined in. */
   async function loadTriggers(workspaceId: string): Promise<{
+    source: string;
     data: ReturnType<typeof parseTriggerData>;
     names: Map<string, string>;
     tablePath: string | null;
@@ -87,7 +116,21 @@ export function registerTriggerTools(server: McpServer, context: ServerContext):
       for (const [key, entry] of parsed.byKey) names.set(key, entry.value);
     }
 
-    return { data, names, tablePath: table?.path ?? null };
+    return { source, data, names, tablePath: table?.path ?? null };
+  }
+
+  function changePayload(result: ChangeResult): ChangeResult {
+    return {
+      changeId: result.changeId,
+      revisionBefore: result.revisionBefore,
+      revisionAfter: result.revisionAfter,
+      dryRun: result.dryRun,
+      filesChanged: [...result.filesChanged],
+      summary: [...result.summary],
+      diagnostics: [...result.diagnostics],
+      requiresRepack: result.requiresRepack,
+      snapshotId: result.snapshotId,
+    };
   }
 
   server.registerTool(
@@ -261,7 +304,7 @@ export function registerTriggerTools(server: McpServer, context: ServerContext):
     {
       title: 'Rename a trigger element',
       description:
-        'Changes an element\'s display name. This edits TriggerStrings.txt only — the trigger data itself is untouched, which is why it is safe while structural trigger editing is not implemented. Defaults to a dry run.',
+        'Changes an element\'s display name in TriggerStrings.txt without changing its graph structure. Defaults to a dry run.',
       inputSchema: z.object({
         workspace_id: WorkspaceIdSchema,
         expected_revision: z.number().int().nonnegative().optional(),
@@ -342,6 +385,166 @@ export function registerTriggerTools(server: McpServer, context: ServerContext):
           requiresRepack: result.requiresRepack,
           snapshotId: result.snapshotId,
           key,
+        },
+      );
+    }),
+  );
+
+  server.registerTool(
+    'sc2_clone_trigger',
+    {
+      title: 'Clone a trigger subgraph',
+      description:
+        'Clones one editor-authored trigger element and every document-owned descendant, allocates new eight-digit hexadecimal ids, remaps local references, preserves native library ids, and attaches the clone beside the selected source reference. Existing TriggerStrings names are copied. Defaults to a dry run.',
+      inputSchema: z.object({
+        workspace_id: WorkspaceIdSchema,
+        expected_revision: z.number().int().nonnegative().optional(),
+        dry_run: z.boolean().optional().describe('Defaults to TRUE.'),
+        source_id: z.string().min(1),
+        parent_id: z.string().nullable().optional().describe('Omit to auto-select a unique parent. Pass null for Root.'),
+        new_name: z.string().min(1).optional(),
+      }),
+      outputSchema: ChangeResultSchema.extend({
+        sourceId: z.string(),
+        clonedRootId: z.string(),
+        parentId: z.string().nullable(),
+        idMap: z.record(z.string(), z.string()),
+        namesCopied: z.number().int(),
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    },
+    toolHandler({ name: 'sc2_clone_trigger', logger }, async (args) => {
+      const { source, data, names, tablePath } = await loadTriggers(args.workspace_id);
+      if (args.new_name !== undefined && tablePath === null) {
+        throw new SC2Error('SC2_NOT_FOUND', `This document has no TriggerStrings table for ${config.defaultLocale}.`, {
+          workspaceId: args.workspace_id,
+          recoverable: false,
+          suggestedAction: 'Create the locale table first, or omit new_name.',
+        });
+      }
+      const outcome = cloneTriggerSubgraph(source, {
+        sourceId: args.source_id,
+        parentId: args.parent_id,
+      });
+      const files: FileOperation[] = [{ kind: 'write', path: TRIGGERS_FILENAME, content: outcome.content }];
+      const summary = [...outcome.summary];
+      let namesCopied = 0;
+
+      if (tablePath !== null) {
+        const table = await workspaces.getTextTable(args.workspace_id, tablePath);
+        const edits: { op: 'set'; key: string; value: string }[] = [];
+        for (const [oldId, newId] of outcome.idMap) {
+          const element = data.elements.get(oldId);
+          if (element === undefined) continue;
+          const oldName = names.get(triggerNameKey(element.type, oldId));
+          const newName = oldId === args.source_id && args.new_name !== undefined
+            ? args.new_name
+            : oldName === undefined
+              ? undefined
+              : oldId === args.source_id
+                ? `${oldName} Copy`
+                : oldName;
+          if (newName === undefined) continue;
+          edits.push({ op: 'set', key: triggerNameKey(element.type, newId), value: newName });
+        }
+        if (edits.length > 0) {
+          const textOutcome = applyTextEdits(table, edits);
+          files.push({ kind: 'write', path: tablePath, content: textOutcome.content });
+          summary.push(...textOutcome.summary, ...textOutcome.noOps.map((line) => `no-op: ${line}`));
+          namesCopied = edits.length;
+        }
+      }
+
+      const result = await workspaces.transactions.run({
+        workspaceId: args.workspace_id,
+        operation: 'sc2_clone_trigger',
+        expectedRevision: args.expected_revision,
+        dryRun: args.dry_run ?? true,
+        summary,
+        files,
+      });
+      return ok(
+        [
+          result.dryRun ? 'DRY RUN, nothing was written.' : `Applied as ${result.changeId}.`,
+          ...result.summary,
+          ...result.filesChanged.map((file) => file.diff ?? file.path),
+        ].join('\n'),
+        {
+          ...changePayload(result),
+          sourceId: outcome.sourceId,
+          clonedRootId: outcome.clonedRootId,
+          parentId: outcome.parentId,
+          idMap: Object.fromEntries(outcome.idMap),
+          namesCopied,
+        },
+      );
+    }),
+  );
+
+  server.registerTool(
+    'sc2_delete_trigger',
+    {
+      title: 'Delete a trigger branch',
+      description:
+        'Detaches one trigger reference and removes only descendant elements that have no remaining incoming path. Shared graph nodes stay intact. Names for removed elements are deleted from TriggerStrings. Defaults to a dry run.',
+      inputSchema: z.object({
+        workspace_id: WorkspaceIdSchema,
+        expected_revision: z.number().int().nonnegative().optional(),
+        dry_run: z.boolean().optional().describe('Defaults to TRUE.'),
+        id: z.string().min(1),
+        parent_id: z.string().nullable().optional().describe('Omit to auto-select a unique parent. Pass null for Root.'),
+      }),
+      outputSchema: ChangeResultSchema.extend({
+        id: z.string(),
+        parentId: z.string().nullable(),
+        removedIds: z.array(z.string()),
+        namesDeleted: z.number().int(),
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+    },
+    toolHandler({ name: 'sc2_delete_trigger', logger }, async (args) => {
+      const { source, data, names, tablePath } = await loadTriggers(args.workspace_id);
+      const outcome = deleteTriggerSubgraph(source, { id: args.id, parentId: args.parent_id });
+      const files: FileOperation[] = [{ kind: 'write', path: TRIGGERS_FILENAME, content: outcome.content }];
+      const summary = [...outcome.summary];
+      let namesDeleted = 0;
+
+      if (tablePath !== null) {
+        const edits = outcome.removedIds.flatMap((id) => {
+          const element = data.elements.get(id);
+          if (element === undefined) return [];
+          const key = triggerNameKey(element.type, id);
+          return names.has(key) ? [{ op: 'delete' as const, key }] : [];
+        });
+        if (edits.length > 0) {
+          const table = await workspaces.getTextTable(args.workspace_id, tablePath);
+          const textOutcome = applyTextEdits(table, edits);
+          files.push({ kind: 'write', path: tablePath, content: textOutcome.content });
+          summary.push(...textOutcome.summary, ...textOutcome.noOps.map((line) => `no-op: ${line}`));
+          namesDeleted = edits.length;
+        }
+      }
+
+      const result = await workspaces.transactions.run({
+        workspaceId: args.workspace_id,
+        operation: 'sc2_delete_trigger',
+        expectedRevision: args.expected_revision,
+        dryRun: args.dry_run ?? true,
+        summary,
+        files,
+      });
+      return ok(
+        [
+          result.dryRun ? 'DRY RUN, nothing was written.' : `Applied as ${result.changeId}.`,
+          ...result.summary,
+          ...result.filesChanged.map((file) => file.diff ?? file.path),
+        ].join('\n'),
+        {
+          ...changePayload(result),
+          id: outcome.id,
+          parentId: outcome.parentId,
+          removedIds: [...outcome.removedIds],
+          namesDeleted,
         },
       );
     }),
