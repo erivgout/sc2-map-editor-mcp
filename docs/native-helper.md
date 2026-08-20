@@ -4,8 +4,8 @@ Packed `.SC2Map`, `.SC2Mod`, and `.SC2Campaign` files are MPQ archives. Reading 
 writing them needs [StormLib](https://github.com/ladislav-zezula/StormLib), a C++
 library, so this repository ships a small helper binary rather than a Node addon.
 
-**Status: built and round-trip validated against real ladder maps.** One manual step
-remains — see [Current status](#current-status).
+**Status: built, round-trip validated against real ladder maps, and verified in the
+Galaxy Editor.** See [Current status](#current-status).
 
 ## Why a sidecar process, not a Node addon
 
@@ -87,9 +87,9 @@ PLAN.md section 10's last validation step is done. An existing user-made map was
 from a packed `.SC2Map`, extended through this server - 119 new catalog objects, 178
 localized strings, one authored Galaxy library - repacked, and opened in the Galaxy Editor.
 
-The map itself was not created here; nothing in this build can create a document. Its
-terrain, regions, placed objects and triggers are the original author's and were never
-touched, because this build cannot write any of them. What was added is data and a script
+The map itself was not created here; nothing in this build creates a document from
+scratch. Its terrain, regions, placed objects, and triggers belonged to the original map
+and were left untouched during this validation. The test added catalog data and a script
 that the map does not execute.
 
 The editor loaded it and wrote `XMLAlerts.txt` naming the authored objects and fields it

@@ -58,15 +58,10 @@ export const IMPLEMENTED: ServerCapabilities = Object.freeze({
   workspace: { read: true, write: true },
   // Phase 3, gated at runtime on the sidecar being present.
   //
-  // PLAN.md §10's round-trip checklist is satisfied except for its last two steps, which
-  // cannot be automated. Six real ladder maps extract, repack, verify, and re-extract
-  // byte-identically (every member's SHA-256 matches), and the full open -> edit ->
-  // commit -> reopen cycle passes on a real packed map. What has NOT been done is opening
-  // a repacked map in the Galaxy Editor or running it in game.
-  //
-  // Advertising write:false while shipping a working, tested writer would be its own kind
-  // of dishonesty, so the flag is true and the unverified step is surfaced instead: every
-  // packed commit emits a warning naming it.
+  // Six real ladder maps extract, repack, verify, and re-extract byte-identically (every
+  // member's SHA-256 matches). The full open -> edit -> commit -> reopen cycle passes on a
+  // real packed map, and repacked output has been opened successfully in the Galaxy
+  // Editor. Automatic in-game execution remains a separate, unsupported capability.
   mpq: { read: true, write: true },
   // Phase 6. Read and parent-chain inheritance work against the document's own catalogs.
   //

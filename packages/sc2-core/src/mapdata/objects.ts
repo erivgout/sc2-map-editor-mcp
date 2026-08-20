@@ -22,10 +22,10 @@
  * </Regions>
  * ```
  *
- * **Read-only, deliberately.** PLAN.md §27 says not to implement writes until a codec has
- * passed editor round-trip tests, and no such test has been run: placing a unit involves
- * ids, flags, and terrain-height interactions this code does not model. Being able to
- * parse a file is not the same as being able to author one.
+ * Object and region writes live in `mutate.ts`. Their codec passed an editor round trip,
+ * so those operations preserve unknown XML while changing only the requested spans.
+ * Terrain remains inspection-only. In particular, object placement does not sample the
+ * height map, so callers must provide the intended z coordinate.
  */
 
 import { SC2Error } from '../errors.js';

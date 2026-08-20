@@ -106,11 +106,45 @@ function limitationsFor(context: ServerContext): string[] {
   if (!capabilities.galaxy.read) {
     notes.push('Galaxy scripts are not parsed yet; there are no symbol or diagnostic tools.');
   }
+  if (!capabilities.galaxy.typecheck) {
+    notes.push(
+      'Galaxy diagnostics are syntax-only; type checking is unavailable because the game native declarations are not loaded.',
+    );
+  }
+  if (!capabilities.triggers.read) {
+    notes.push('Trigger data is not parsed in this build.');
+  } else if (!capabilities.triggers.write) {
+    notes.push(
+      'Trigger structure is read-only. Display names can be renamed safely, but actions, events, conditions, and graph nodes cannot be created or rewired.',
+    );
+  }
+  if (!capabilities.layout.read) {
+    notes.push('SC2Layout files are not parsed or editable in this build.');
+  } else if (!capabilities.layout.write) {
+    notes.push('SC2Layout files can be inspected but not edited in this build.');
+  }
+  if (!capabilities.objects.read) {
+    notes.push('Placed objects and regions are not parsed in this build.');
+  } else if (!capabilities.objects.write) {
+    notes.push('Placed objects and regions can be inspected but not edited in this build.');
+  }
+  if (!capabilities.terrain.read) {
+    notes.push('Terrain data is not parsed in this build.');
+  } else if (!capabilities.terrain.write) {
+    notes.push(
+      'Terrain support is inspection-only: the descriptor and binary headers are reported, but height, texture, pathing, cliff, and water data cannot be edited.',
+    );
+  }
   if (!capabilities.editorLaunch) {
     notes.push(
       context.selectedInstallation === null
         ? 'No unambiguous StarCraft II installation was detected, so editor integration is unavailable.'
         : 'Editor launching is not implemented in this build.',
+    );
+  }
+  if (!capabilities.runtimeSmokeTest) {
+    notes.push(
+      'An automated in-game runtime smoke test is unavailable; this build can open a document in the editor and read editor logs only.',
     );
   }
   return notes;

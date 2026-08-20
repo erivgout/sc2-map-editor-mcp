@@ -25,7 +25,15 @@ build-plan phase they complete.
 - **Galaxy scripts** (Phase 9). Parsing, symbols, syntax diagnostics, and guarded text
   patching via the vendored toolkit.
 - **Triggers** (Phase 11). Structure and names, read-only apart from renaming.
-- **Placed objects, regions, terrain descriptor** (Phases 15–16). Read-only.
+- **Placed objects and regions** (Phase 15). Read, place/create, move, rename, rescale,
+  and delete operations, validated by reopening the packed result in the Galaxy Editor.
+- **Terrain descriptor** (Phase 16). Tile set, dimensions, cliff sets, and binary
+  component headers are readable. Terrain bulk data remains inspection-only.
+- **Packed MPQ documents** (Phase 3). The `sc2mpq` sidecar opens, verifies, extracts,
+  repacks, and reopens `.SC2Map`, `.SC2Mod`, and `.SC2Campaign` archives. Real ladder
+  maps round-trip byte-identically, and authored output loads in the Galaxy Editor.
+- **Local dependencies** (Phase 6). Unpacked `.SC2Mod` directories are indexed as
+  read-only dependency sources for inheritance, search, and reference analysis.
 - **Validation and commit** (Phase 12). Per-category verdicts that distinguish "checked and
   clean" from "not checked"; commit with preflight, source-divergence detection, and
   backup.
@@ -36,11 +44,17 @@ build-plan phase they complete.
 
 ### Known gaps
 
-- **Packed `.SC2Map` archives cannot be opened.** The `sc2mpq` sidecar is written but has
-  never been compiled — see [docs/native-helper.md](docs/native-helper.md).
-- **No Galaxy type checking.** Syntax only; see [docs/galaxy.md](docs/galaxy.md).
-- **No structural trigger editing**, and **no writing** of placed objects or terrain.
-- **Dependency archives are not loaded**, so catalog results cover the open document only.
+- **No Galaxy type checking.** Diagnostics are syntax-only; see
+  [docs/galaxy.md](docs/galaxy.md).
+- **No structural trigger editing.** Trigger names can be changed, but graph nodes and
+  undocumented editor ids are not generated.
+- **No SC2Layout support.** Layout files are not parsed or edited.
+- **No terrain writing.** Height, texture, pathing, cliff, and water codecs are not
+  implemented.
+- **No stock CASC dependency loading.** Local unpacked mods load, but Blizzard's stock
+  mods remain inside the installation's CASC store.
+- **No automated in-game smoke test.** The server opens documents in the Galaxy Editor
+  and reads its logs, but it does not claim an unverified test-map launch path.
 
 Full detail: [docs/capabilities.md](docs/capabilities.md).
 

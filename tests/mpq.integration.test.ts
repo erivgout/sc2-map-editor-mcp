@@ -5,13 +5,12 @@
  * toolchain and the Windows SDK. Run `scripts/bootstrap.ps1` then
  * `scripts/build-native.ps1` to enable these.
  *
- * Scope and its limits. These tests prove the *machinery*: that a directory packs, that
+ * Scope and its limits. These tests prove the machinery: that a directory packs, that
  * the archive reopens, enumerates, verifies, and extracts back to byte-identical
- * contents, and that hostile archive paths are refused. They do **not** prove SC2
- * compatibility. PLAN.md §10's real exit criterion — several editor-authored maps
- * surviving extract/repack and still loading in the Galaxy Editor — needs a corpus of
- * self-authored maps that cannot be committed here, so it stays a manual step. Until it
- * passes, `capabilities.mpq.write` stays false.
+ * contents, and that hostile archive paths are refused. A generated fixture alone does
+ * not prove SC2 compatibility. The separate real-map integration test and the manual
+ * editor corpus recorded in docs/native-helper.md provide that evidence, which is why
+ * `capabilities.mpq.write` is true when the helper probe passes.
  */
 
 import { existsSync } from 'node:fs';

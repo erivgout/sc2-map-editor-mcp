@@ -28,7 +28,7 @@ Unknown keys are rejected rather than ignored, for the same reason.
 | `allowedRoots` | `string[]` | `[]` | Absolute directories the server may read and write under. **Empty means every path is denied.** |
 | `workspaceRoot` | `string` | `%LOCALAPPDATA%\sc2-map-editor-mcp` | Server-owned state: staged workspaces, snapshots, change history, logs. |
 | `sc2InstallPath` | `string \| null` | `null` | StarCraft II installation root. `null` autodetects. |
-| `mpqHelperPath` | `string \| null` | `null` | Path to the `sc2mpq` sidecar. Not yet used. |
+| `mpqHelperPath` | `string \| null` | `null` | Path to the `sc2mpq` sidecar. `null` searches the repository's native helper output. |
 | `defaultLocale` | `string` | `"enUS"` | Locale assumed when a tool does not name one. |
 | `allowOverwrite` | `boolean` | `false` | Whether commit may overwrite an existing output file. |
 | `maxArchiveBytes` | `number` | `2147483648` | Refuse archives larger than this. |

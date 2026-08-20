@@ -2,10 +2,11 @@
  * The full packed-map workflow, end to end, against a **real ladder map** from the
  * StarCraft II installation.
  *
- * This is PLAN.md §42 Phase 3's exit criterion and §56's vertical slice, minus the one
- * step that cannot be automated: opening the result in the Galaxy Editor. Everything up to
- * that point runs here — open a packed `.SC2Map`, inspect it, edit a catalog value, commit
- * a new archive, and reopen the result to confirm the change survived.
+ * This is PLAN.md §42 Phase 3's exit criterion and §56's vertical slice, except for
+ * opening the result in the Galaxy Editor. That check has been completed manually and is
+ * recorded in docs/native-helper.md. Everything deterministic runs here: open a packed
+ * `.SC2Map`, inspect it, edit a catalog value, commit a new archive, and reopen the result
+ * to confirm the change survived.
  *
  * Skipped when the `sc2mpq` helper is not built or no installation is present. The
  * original map is never modified: it is opened read-only into staging, and output goes to

@@ -213,7 +213,18 @@ describe('MCP server', () => {
     // Galaxy is implemented but gated on the vendored toolkit, which this harness skips.
     expect(capabilities['galaxy']).toEqual({ read: false, write: false, typecheck: false });
 
-    expect(outcome.structured['limitations']).toEqual(expect.arrayContaining([expect.stringContaining('Packed')]));
+    const limitations = outcome.structured['limitations'] as string[];
+    expect(limitations).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('Packed'),
+        expect.stringContaining('Galaxy scripts'),
+        expect.stringContaining('type checking'),
+        expect.stringContaining('Trigger structure'),
+        expect.stringContaining('SC2Layout'),
+        expect.stringContaining('Terrain'),
+        expect.stringContaining('runtime smoke test'),
+      ]),
+    );
   });
 
   it('opens a document, inspects it, and discards it', async () => {

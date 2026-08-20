@@ -180,7 +180,7 @@ simply reports `false`.
 Create a config file (see [docs/configuration.md](docs/configuration.md)):
 
 ```bash
-node apps/sc2-mcp-server/dist/main.js doctor
+node apps/sc2-mcp-server/dist/main.js doctor --config C:\path\to\sc2-mcp.config.json
 ```
 
 `doctor` prints the resolved configuration, the detected StarCraft II installation, and
@@ -189,7 +189,19 @@ useful — for example when no allowed roots are configured.
 
 ### Connecting an MCP client
 
-The server speaks MCP over stdio. Point your client at the built entry point:
+The server speaks MCP over stdio. Codex stores local MCP registrations in its shared
+configuration. Register this server with the supported CLI command:
+
+```powershell
+codex mcp add sc2_editor -- node C:\path\to\SC2EditorMCP\apps\sc2-mcp-server\dist\main.js --config C:\path\to\SC2EditorMCP\sc2-mcp.config.json
+codex mcp get sc2_editor
+```
+
+Restart the Codex client after adding the server. The Codex app, CLI, and IDE extension
+share the same local MCP configuration. See the
+[official Codex MCP setup](https://developers.openai.com/codex/mcp).
+
+For another MCP client, point its STDIO configuration at the same built entry point:
 
 ```json
 {
