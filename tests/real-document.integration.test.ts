@@ -26,6 +26,7 @@ import {
   diffText,
   MpqHelper,
   findSc2DocumentsFolder,
+  inspectTerrainFiles,
   listEditorLogs,
   parseCatalogFile,
   buildTriggerTree,
@@ -33,7 +34,10 @@ import {
   parseDocumentInfo,
   parsePlacedObjects,
   parseRegions,
+  parseTerrainDescriptor,
   parseTerrainSummary,
+  readTerrainCell,
+  readTerrainVertex,
   readBinaryHeader,
   parseTextTable,
   parseTriggerData,
@@ -44,6 +48,13 @@ import {
   WorkspaceService,
   WorkspaceStore,
   XmlEditor,
+  CELL_FLAGS_FILENAME,
+  HEIGHT_MAP_FILENAME,
+  SYNC_CLIFF_LEVEL_FILENAME,
+  SYNC_HEIGHT_MAP_FILENAME,
+  SYNC_TEXTURE_INFO_FILENAME,
+  TERRAIN_BINARY_FILENAMES,
+  TEXTURE_MASKS_FILENAME,
 } from '@sc2mcp/core';
 import { createTempDir, type TempDir } from '@sc2mcp/test-utils';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -281,7 +292,18 @@ describe.skipIf(mapPath === null)('real editor-produced document', () => {
     expect(terrain.cliffSets.every((entry) => typeof entry === 'string' && entry !== '')).toBe(true);
   });
 
-  it('reads binary terrain headers without interpreting their contents', async () => {
+  it('decodes and cross-validates the shipped binary terrain components', async () => {
+    const descriptorSource = await readFile(path.join(documentPath, 't3Terrain.xml'), 'utf8');
+    const descriptor = parseTerrainDescriptor(descriptorSource);
+    const files = new Map<string, Uint8Array>();
+    for (const terrainPath of TERRAIN_BINARY_FILENAMES) {
+      const absolutePath = path.join(documentPath, terrainPath);
+      if (existsSync(absolutePath)) files.set(terrainPath, await readFile(absolutePath));
+    }
+
+    const inspected = inspectTerrainFiles(descriptorSource, files);
+    expect(inspected.issues).toEqual([]);
+
     const heightMap = await readFile(path.join(documentPath, 't3HeightMap'));
     const header = readBinaryHeader('t3HeightMap', heightMap);
 
@@ -293,6 +315,29 @@ describe.skipIf(mapPath === null)('real editor-produced document', () => {
     expect(header.version).toBe(101);
     expect(header.known).toBe(true);
     expect(header.sizeBytes).toBeGreaterThan(100_000);
+
+    const vertex = readTerrainVertex(
+      descriptor,
+      files.get(HEIGHT_MAP_FILENAME)!,
+      files.get(SYNC_HEIGHT_MAP_FILENAME)!,
+      0,
+      0,
+    );
+    expect(Number.isFinite(vertex.worldHeight)).toBe(true);
+    expect(Number.isFinite(vertex.syncHeight)).toBe(true);
+
+    const cell = readTerrainCell(
+      descriptor,
+      files.get(CELL_FLAGS_FILENAME)!,
+      files.get(TEXTURE_MASKS_FILENAME)!,
+      files.get(SYNC_CLIFF_LEVEL_FILENAME)!,
+      files.get(SYNC_TEXTURE_INFO_FILENAME)!,
+      0,
+      0,
+    );
+    expect(cell.flags).toBeGreaterThanOrEqual(0);
+    expect(cell.textureWeights).toHaveLength(8);
+    expect(cell.cliffLevel).toBeGreaterThanOrEqual(0);
   });
 
   it('locates the installation and reports the current build', async () => {

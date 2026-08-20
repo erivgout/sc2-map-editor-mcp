@@ -15,16 +15,16 @@ answer for a running build. As of now:
 
 | Subsystem | Read | Write | Notes |
 |---|---|---|---|
-| Workspace staging | ✅ | ✅ | Unpacked document directories only |
+| Workspace staging | ✅ | ✅ | Unpacked documents, plus packed documents when the MPQ helper is available |
 | Component inventory | ✅ | ⚠️ | `ComponentList` is read-only; `DocumentInfo` fields and the dependency chain are writable |
-| GameData catalogs | ✅ | ✅ | Search, inspect, resolve inheritance, find references, patch/clone/create/delete. Own document only — dependencies are not loaded |
+| GameData catalogs | ✅ | ✅ | Search, inspect, resolve inheritance, find references, patch/clone/create/delete. Local dependencies load read-only |
 | MPQ archives (`.SC2Map`, `.SC2Mod`) | ✅ | ✅ | Byte-identical round trips on real ladder maps, and maps packed here open in the editor — see [docs/native-helper.md](docs/native-helper.md) |
 | Galaxy scripts | ✅ | ✅ | Parse, symbols, syntax diagnostics, safe text patching. **No type checking** — needs the game's natives. Requires the vendored toolkit to be built |
 | Triggers | ✅ | ⚠️ | Structure, names, search. Renaming only — structural editing deliberately not implemented |
 | Localization | ✅ | ✅ | Text tables, preserving BOM and CRLF exactly |
-| SC2Layout | ❌ | ❌ | Phase 10 |
+| SC2Layout | ✅ | ✅ | List, read, diagnose, search, create, and losslessly patch layout elements |
 | Placed objects / regions | ✅ | ✅ | Both are XML, not binary. Place, move, delete — round-tripped through the editor. Terrain height is not consulted |
-| Terrain | ⚠️ | ❌ | Descriptor only (tile set, dimensions, cliff sets). Bulk data reported by magic/version/size, never decoded |
+| Terrain | ✅ | ✅ | Typed height, texture, pathing, and cliff reads/writes, synchronized-file updates, validation, and bounded raw component access. See [docs/terrain.md](docs/terrain.md) |
 | Editor launch | ✅ | n/a | Opens a document in the Galaxy Editor; reads its logs. Automatic **test-map launching is not provided** — no reliable mechanism verified |
 
 Why the gaps are where they are, and what "⚠️" means in each row:
@@ -80,6 +80,12 @@ rather than missing, because that is a very different thing from your map being 
 | `sc2_get_galaxy_diagnostics` | yes | Syntax errors with line and column |
 | `sc2_apply_galaxy_patch` | no | Exact-text edit, refused if it breaks the parse |
 | `sc2_create_galaxy_file` | no | Add a library, syntax-checked first |
+| `sc2_list_layouts` | yes | Layout files with frame and diagnostic counts |
+| `sc2_get_layout` | yes | Exact layout source plus an element index |
+| `sc2_get_layout_diagnostics` | yes | XML and structural layout diagnostics |
+| `sc2_search_layouts` | yes | Find frame, template, and include declarations |
+| `sc2_create_layout` | no | Create a valid SC2Layout file |
+| `sc2_apply_layout_patch` | no | Targeted, lossless element or attribute edits |
 | `sc2_list_triggers` | yes | The trigger tree with names resolved |
 | `sc2_get_trigger` | yes | One element: type, name, contents, referrers, raw XML |
 | `sc2_search_triggers` | yes | Find trigger elements by name |
@@ -95,7 +101,15 @@ rather than missing, because that is a very different thing from your map being 
 | `sc2_add_dependency` | no | Append a dependency; later entries win in load order |
 | `sc2_remove_dependency` | no | Remove a dependency, matched by its `file:` half |
 | `sc2_set_document_info` | no | Set a single-valued `DocInfo` field such as `ModType` |
-| `sc2_get_terrain_summary` | yes | Terrain descriptor plus binary component headers |
+| `sc2_get_terrain_summary` | yes | Decode the descriptor and validate all terrain components |
+| `sc2_get_terrain_vertex` | yes | Read render and synchronized height at one vertex |
+| `sc2_set_terrain_height` | no | Write render and synchronized height together |
+| `sc2_get_terrain_cell` | yes | Read pathing, cliff, texture blend, and synchronized texture data |
+| `sc2_set_terrain_cell_flags` | no | Set one pathing-flags byte |
+| `sc2_set_terrain_texture` | no | Paint eight texture layers and update synchronized texture data |
+| `sc2_set_terrain_cliff` | no | Set descriptor and synchronized cliff data together |
+| `sc2_get_terrain_component` | yes | Read a bounded raw byte range as base64 |
+| `sc2_patch_terrain_component` | no | Apply a bounded raw patch and validate the component before writing |
 | `sc2_create_unit_from_template` | no | Clone a unit with a name, stats, and its own weapon |
 | `sc2_set_unit_weapon_damage` | no | Change one unit's damage without touching units that share it |
 | `sc2_isolate_shared_object` | no | Give one owner its own copy of something shared |
@@ -136,8 +150,9 @@ defaults are conservative:
 - **Edits are lossless, previewable, and reversible.** XML changes splice exact byte
   ranges, so everything outside the edit — comments, attribute order, CRLF endings,
   whether the file ends in a newline — comes out identical. Every mutation snapshots
-  first, supports `dry_run`, produces a unified diff, rolls back completely if any part
-  fails, and can be reverted afterwards.
+  first, supports `dry_run`, rolls back completely if any part fails, and can be reverted
+  afterwards. Text changes produce unified diffs; binary changes report exact before and
+  after hashes.
 
 ## Requirements
 

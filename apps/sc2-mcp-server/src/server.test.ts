@@ -22,6 +22,75 @@ import { createMcpServer } from './server.js';
 
 const DOCUMENT_FIXTURE = MINIMAL_DOCUMENT;
 
+const TERRAIN_DESCRIPTOR =
+  '<?xml version="1.0" encoding="utf-8"?>\r\n' +
+  '<terrain version="115">\r\n' +
+  '    <heightMap tileSet="Test" dim="3 3 " offset="0 0 0 " scale="1 1 1 ">\r\n' +
+  '        <vertData quantizeBias="1" quantizeScale="0.001" standardHeight="8" name="t3HeightMap"/>\r\n' +
+  '        <masks name="t3TextureMasks"/>\r\n' +
+  '        <textureSetList num="8"><textureSet i="0" name="Test"/></textureSetList>\r\n' +
+  '        <textureList num="64"><texture i="0" name="Ground"/><texture i="1" name="Rock"/></textureList>\r\n' +
+  '        <blockTextureSetList num="0"/>\r\n' +
+  '        <cliffCellList num="1" numOccupied="0"/>\r\n' +
+  '    </heightMap>\r\n' +
+  '</terrain>\r\n';
+
+function terrainFixture(): Record<string, string | Uint8Array> {
+  const heightMap = Buffer.alloc(32 + 6 * 9);
+  heightMap.write('HMAP', 0, 'ascii');
+  heightMap.writeUInt32LE(101, 4);
+  heightMap.writeUInt32LE(3, 8);
+  heightMap.writeUInt32LE(3, 12);
+  for (let index = 0; index < 9; index += 1) {
+    heightMap.writeUInt16LE(9000, 32 + index * 6);
+    heightMap.writeUInt16LE(1000, 34 + index * 6);
+    heightMap.writeUInt16LE(1, 36 + index * 6);
+  }
+
+  const syncHeight = Buffer.alloc(64 + 4 * 9);
+  syncHeight.write('SMAP', 0, 'ascii');
+  syncHeight.writeUInt32LE(102, 4);
+  syncHeight.writeUInt32LE(3, 8);
+  syncHeight.writeUInt32LE(3, 12);
+  for (let index = 0; index < 9; index += 1) syncHeight.writeUInt16LE(2048, 64 + index * 4);
+
+  const cellFlags = Buffer.alloc(32 + 4);
+  cellFlags.write('LFCT', 0, 'ascii');
+  cellFlags.writeUInt32LE(102, 4);
+  cellFlags.writeUInt32LE(2, 24);
+  cellFlags.writeUInt32LE(2, 28);
+
+  const textureMasks = Buffer.alloc(64 + 8 * 2048);
+  textureMasks.write('MASK', 0, 'ascii');
+  textureMasks.writeUInt32LE(102, 4);
+  textureMasks.writeUInt32LE(64, 12);
+  textureMasks.writeUInt32LE(64, 16);
+
+  const syncCliff = Buffer.alloc(32 + 2 * 4);
+  syncCliff.write('CLIF', 0, 'ascii');
+  syncCliff.writeUInt32LE(100, 4);
+  for (let index = 0; index < 4; index += 1) syncCliff.writeUInt16LE(64, 32 + index * 2);
+
+  const names = Buffer.from('Ground\0Rock\0\0\0\0\0\0\0', 'utf8');
+  const syncTexture = Buffer.alloc(20 + names.length + 8 * 4);
+  syncTexture.write('RTXT', 0, 'ascii');
+  syncTexture.writeUInt32LE(101, 4);
+  syncTexture.writeUInt32LE(2, 8);
+  syncTexture.writeUInt32LE(2, 12);
+  syncTexture.writeUInt32LE(1, 16);
+  names.copy(syncTexture, 20);
+
+  return {
+    't3Terrain.xml': TERRAIN_DESCRIPTOR,
+    t3HeightMap: heightMap,
+    t3SyncHeightMap: syncHeight,
+    t3CellFlags: cellFlags,
+    t3TextureMasks: textureMasks,
+    t3SyncCliffLevel: syncCliff,
+    t3SyncTextureInfo: syncTexture,
+  };
+}
+
 interface Harness {
   client: Client;
   temp: TempDir;
@@ -102,12 +171,14 @@ describe('MCP server', () => {
     expect(names).toEqual([
       'sc2_add_dependency',
       'sc2_apply_galaxy_patch',
+      'sc2_apply_layout_patch',
       'sc2_check_shared_object',
       'sc2_clone_catalog_object',
       'sc2_commit_document',
       'sc2_copy_text_key',
       'sc2_create_catalog_object',
       'sc2_create_galaxy_file',
+      'sc2_create_layout',
       'sc2_create_region',
       'sc2_create_snapshot',
       'sc2_create_unit_from_template',
@@ -129,8 +200,13 @@ describe('MCP server', () => {
       'sc2_get_galaxy_diagnostics',
       'sc2_get_galaxy_file',
       'sc2_get_galaxy_symbols',
+      'sc2_get_layout',
+      'sc2_get_layout_diagnostics',
       'sc2_get_server_info',
+      'sc2_get_terrain_cell',
+      'sc2_get_terrain_component',
       'sc2_get_terrain_summary',
+      'sc2_get_terrain_vertex',
       'sc2_get_text_value',
       'sc2_get_trigger',
       'sc2_get_user_maps',
@@ -141,6 +217,7 @@ describe('MCP server', () => {
       'sc2_list_components',
       'sc2_list_files',
       'sc2_list_galaxy_files',
+      'sc2_list_layouts',
       'sc2_list_locales',
       'sc2_list_placed_objects',
       'sc2_list_regions',
@@ -149,6 +226,7 @@ describe('MCP server', () => {
       'sc2_list_workspaces',
       'sc2_open_document',
       'sc2_patch_catalog_object',
+      'sc2_patch_terrain_component',
       'sc2_place_object',
       'sc2_read_file',
       'sc2_remove_dependency',
@@ -158,9 +236,14 @@ describe('MCP server', () => {
       'sc2_revert_change',
       'sc2_search_catalog',
       'sc2_search_files',
+      'sc2_search_layouts',
       'sc2_search_text_keys',
       'sc2_search_triggers',
       'sc2_set_document_info',
+      'sc2_set_terrain_cell_flags',
+      'sc2_set_terrain_cliff',
+      'sc2_set_terrain_height',
+      'sc2_set_terrain_texture',
       'sc2_set_text_value',
       'sc2_set_unit_weapon_damage',
       'sc2_update_object',
@@ -204,7 +287,8 @@ describe('MCP server', () => {
     expect(capabilities['gamedata']).toEqual({ read: true, write: true, inheritance: true });
     // ...and nothing that depends on an unbuilt backend claims to.
     expect(capabilities['mpq']).toEqual({ read: false, write: false });
-    expect(capabilities['terrain']).toEqual({ read: true, write: false });
+    expect(capabilities['layout']).toEqual({ read: true, write: true });
+    expect(capabilities['terrain']).toEqual({ read: true, write: true });
     // Objects and Regions are plain XML and need no external backend, so they are writable
     // wherever the server runs.
     expect(capabilities['objects']).toEqual({ read: true, write: true });
@@ -220,11 +304,143 @@ describe('MCP server', () => {
         expect.stringContaining('Galaxy scripts'),
         expect.stringContaining('type checking'),
         expect.stringContaining('Trigger structure'),
-        expect.stringContaining('SC2Layout'),
-        expect.stringContaining('Terrain'),
         expect.stringContaining('runtime smoke test'),
       ]),
     );
+    expect(limitations).not.toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('SC2Layout'),
+        expect.stringContaining('Terrain'),
+      ]),
+    );
+  });
+
+  it('reads, searches, creates, and losslessly patches SC2Layout files through MCP', async () => {
+    const layoutPath = 'Base.SC2Data/UI/Layout/Test.SC2Layout';
+    const original = '<?xml version="1.0" encoding="utf-8"?>\r\n<Desc>\r\n    <Frame type="Frame" name="Root"/>\r\n</Desc>\r\n';
+    await writeTree(harness.sourceDir, { [layoutPath]: original });
+
+    const opened = await callTool(harness.client, 'sc2_open_document', { source_path: harness.sourceDir });
+    const workspaceId = (opened.structured['workspace'] as Record<string, unknown>)['id'] as string;
+
+    const listed = await callTool(harness.client, 'sc2_list_layouts', { workspace_id: workspaceId });
+    expect((listed.structured['layouts'] as { path: string }[]).map((layout) => layout.path)).toEqual([layoutPath]);
+
+    const read = await callTool(harness.client, 'sc2_get_layout', { workspace_id: workspaceId, path: layoutPath });
+    expect(read.structured['content']).toBe(original);
+    const diagnostics = await callTool(harness.client, 'sc2_get_layout_diagnostics', { workspace_id: workspaceId, path: layoutPath });
+    expect(diagnostics.structured['valid']).toBe(true);
+    const searched = await callTool(harness.client, 'sc2_search_layouts', { workspace_id: workspaceId, query: 'Root' });
+    expect(searched.structured['total']).toBe(1);
+
+    const patchArgs = {
+      workspace_id: workspaceId,
+      path: layoutPath,
+      selector: { element: 'Frame', attributes: { name: 'Root' } },
+      patch: { op: 'set_attribute', name: 'name', value: 'EditedRoot' },
+    };
+    const preview = await callTool(harness.client, 'sc2_apply_layout_patch', patchArgs);
+    expect(preview.structured['dryRun']).toBe(true);
+    expect((await callTool(harness.client, 'sc2_get_layout', { workspace_id: workspaceId, path: layoutPath })).structured['content']).toBe(original);
+
+    const applied = await callTool(harness.client, 'sc2_apply_layout_patch', { ...patchArgs, dry_run: false });
+    expect(applied.isError).toBe(false);
+    const edited = (await callTool(harness.client, 'sc2_get_layout', { workspace_id: workspaceId, path: layoutPath })).structured['content'] as string;
+    expect(edited).toContain('name="EditedRoot"');
+    expect(edited.replace('name="EditedRoot"', 'name="Root"')).toBe(original);
+
+    const createdPath = 'Base.SC2Data/UI/Layout/Created.SC2Layout';
+    const created = await callTool(harness.client, 'sc2_create_layout', {
+      workspace_id: workspaceId,
+      path: createdPath,
+      dry_run: false,
+    });
+    expect(created.isError).toBe(false);
+    expect((await callTool(harness.client, 'sc2_get_layout_diagnostics', { workspace_id: workspaceId, path: createdPath })).structured['valid']).toBe(true);
+  });
+
+  it('includes SC2Layout structural errors in aggregate validation', async () => {
+    const layoutPath = 'Base.SC2Data/UI/Layout/Broken.SC2Layout';
+    await writeTree(harness.sourceDir, { [layoutPath]: '<Desc><Frame type="Frame"/></Desc>' });
+    const opened = await callTool(harness.client, 'sc2_open_document', { source_path: harness.sourceDir });
+    const workspaceId = (opened.structured['workspace'] as Record<string, unknown>)['id'] as string;
+
+    const validation = await callTool(harness.client, 'sc2_validate_document', { workspace_id: workspaceId });
+    expect(validation.structured['valid']).toBe(false);
+    const checks = validation.structured['checks'] as Record<string, { status: string }>;
+    expect(checks['xml']?.status).toBe('failed');
+    const errors = validation.structured['errors'] as { path?: string; message: string }[];
+    expect(errors).toEqual(expect.arrayContaining([expect.objectContaining({ path: layoutPath, message: expect.stringContaining('name attribute') })]));
+  });
+
+  it('decodes and writes synchronized terrain components through MCP', async () => {
+    await writeTree(harness.sourceDir, terrainFixture());
+    const opened = await callTool(harness.client, 'sc2_open_document', { source_path: harness.sourceDir });
+    const workspaceId = (opened.structured['workspace'] as Record<string, unknown>)['id'] as string;
+
+    const summary = await callTool(harness.client, 'sc2_get_terrain_summary', { workspace_id: workspaceId });
+    expect(summary.structured['valid']).toBe(true);
+    expect((summary.structured['descriptor'] as Record<string, unknown>)['width']).toBe(3);
+
+    const originalVertex = await callTool(harness.client, 'sc2_get_terrain_vertex', { workspace_id: workspaceId, x: 1, y: 2 });
+    expect(originalVertex.structured['worldHeight']).toBeCloseTo(8, 3);
+    const heightPreview = await callTool(harness.client, 'sc2_set_terrain_height', {
+      workspace_id: workspaceId,
+      x: 1,
+      y: 2,
+      world_height: 10.5,
+    });
+    expect(heightPreview.structured['dryRun']).toBe(true);
+    expect((await callTool(harness.client, 'sc2_get_terrain_vertex', { workspace_id: workspaceId, x: 1, y: 2 })).structured['worldHeight']).toBeCloseTo(8, 3);
+    await callTool(harness.client, 'sc2_set_terrain_height', { workspace_id: workspaceId, x: 1, y: 2, world_height: 10.5, dry_run: false });
+    const editedVertex = await callTool(harness.client, 'sc2_get_terrain_vertex', { workspace_id: workspaceId, x: 1, y: 2 });
+    expect(editedVertex.structured['worldHeight']).toBeCloseTo(10.5, 3);
+    expect(editedVertex.structured['syncHeight']).toBeCloseTo(10.5, 3);
+
+    await callTool(harness.client, 'sc2_set_terrain_cell_flags', { workspace_id: workspaceId, x: 1, y: 0, flags: 0xa5, dry_run: false });
+    await callTool(harness.client, 'sc2_set_terrain_texture', {
+      workspace_id: workspaceId,
+      x: 0,
+      y: 1,
+      weights: [0, 15, 2, 3, 4, 5, 6, 7],
+      dry_run: false,
+    });
+    await callTool(harness.client, 'sc2_set_terrain_cliff', {
+      workspace_id: workspaceId,
+      x: 0,
+      y: 0,
+      flags: 1,
+      cliff_id: 0,
+      variation: 2,
+      cliff_level: 5,
+      dry_run: false,
+    });
+
+    const textured = await callTool(harness.client, 'sc2_get_terrain_cell', { workspace_id: workspaceId, x: 0, y: 1 });
+    expect(textured.structured['textureWeights']).toEqual([0, 15, 2, 3, 4, 5, 6, 7]);
+    expect(textured.structured['textureIndex']).toBe(1);
+    const cliff = await callTool(harness.client, 'sc2_get_terrain_cell', { workspace_id: workspaceId, x: 0, y: 0 });
+    expect(cliff.structured['cliffLevel']).toBe(5);
+    expect(cliff.structured['descriptorCliff']).toEqual({ index: 0, flags: 1, cliffId: 0, variation: 2 });
+
+    const raw = await callTool(harness.client, 'sc2_get_terrain_component', {
+      workspace_id: workspaceId,
+      component: 't3CellFlags',
+      offset: 33,
+      length: 1,
+    });
+    expect(raw.structured['dataBase64']).toBe(Buffer.from([0xa5]).toString('base64'));
+    await callTool(harness.client, 'sc2_patch_terrain_component', {
+      workspace_id: workspaceId,
+      component: 't3CellFlags',
+      offset: 33,
+      data_base64: Buffer.from([7]).toString('base64'),
+      dry_run: false,
+    });
+    expect((await callTool(harness.client, 'sc2_get_terrain_cell', { workspace_id: workspaceId, x: 1, y: 0 })).structured['flags']).toBe(7);
+
+    const validation = await callTool(harness.client, 'sc2_validate_document', { workspace_id: workspaceId });
+    expect((validation.structured['checks'] as Record<string, { status: string }>)['terrain']?.status).toBe('passed');
   });
 
   it('opens a document, inspects it, and discards it', async () => {
@@ -929,13 +1145,11 @@ describe('MCP server', () => {
     expect(checks['gamedata']?.status).toBe('passed');
     expect(checks['xml']?.status).toBe('passed');
 
-    // The point of the category model: unchecked is not the same as clean, and the report
-    // has to say so where a reader will see it. Terrain is the one that genuinely has no
-    // codec; galaxy and triggers report what they actually did, which depends on the
-    // machine rather than being hardcoded.
-    expect(report.structured['notChecked']).toEqual(expect.arrayContaining(['terrain']));
-    expect(checks['terrain']?.reason).toContain('not checked at all');
-    expect(report.text).toContain('NOT CHECKED AT ALL');
+    // A missing component is inapplicable, not unsupported. Terrain has real codecs now,
+    // so it must never be reported as an unchecked category.
+    expect(report.structured['notChecked']).not.toEqual(expect.arrayContaining(['terrain']));
+    expect(checks['terrain']?.status).toBe('skipped');
+    expect(checks['terrain']?.reason).toContain('no t3Terrain.xml');
 
     // A category may only claim "passed" when it really ran, so anything that is not
     // passed has to explain itself.

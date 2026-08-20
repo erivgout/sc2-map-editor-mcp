@@ -66,12 +66,12 @@ export function registerWorkspaceTools(server: McpServer, context: ServerContext
     {
       title: 'Open an SC2 document',
       description:
-        'Stages a StarCraft II map, mod, or campaign into a server-owned working copy and returns a workspace id used by every other tool. The source is never modified: all edits target the staging copy until sc2_commit_document writes a new file. Currently only unpacked document directories are supported; packed .SC2Map/.SC2Mod archives require the MPQ helper, which this build does not have.',
+        'Stages a StarCraft II map, mod, or campaign into a server-owned working copy and returns a workspace id used by every other tool. The source is never modified: all edits target the staging copy until sc2_commit_document writes a new file. Unpacked directories work directly; packed .SC2Map/.SC2Mod/.SC2Campaign archives work when the MPQ helper is available.',
       inputSchema: z.object({
         source_path: z
           .string()
           .min(1)
-          .describe('Absolute path to an unpacked SC2 document directory. Must be inside a configured allowed root.'),
+          .describe('Absolute path to an unpacked document or packed SC2 archive. Must be inside a configured allowed root.'),
         document_kind: z
           .enum(['map', 'mod', 'campaign', 'unknown'])
           .optional()

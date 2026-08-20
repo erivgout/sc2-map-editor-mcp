@@ -22,13 +22,17 @@ build-plan phase they complete.
   rollback, `dry_run`, unified diffs, and revert.
 - **Localization** (Phase 10). Text tables with BOM and CRLF preserved, plus a
   missing-display-name report.
+- **SC2Layout** (Phase 10). List, exact-source reads, structural diagnostics, declaration
+  search, valid file creation, and targeted lossless XML patches.
 - **Galaxy scripts** (Phase 9). Parsing, symbols, syntax diagnostics, and guarded text
   patching via the vendored toolkit.
 - **Triggers** (Phase 11). Structure and names, read-only apart from renaming.
 - **Placed objects and regions** (Phase 15). Read, place/create, move, rename, rescale,
   and delete operations, validated by reopening the packed result in the Galaxy Editor.
-- **Terrain descriptor** (Phase 16). Tile set, dimensions, cliff sets, and binary
-  component headers are readable. Terrain bulk data remains inspection-only.
+- **Terrain codecs and mutation** (Phase 16). Descriptor, render and synchronized
+  heights, pathing flags, eight-layer texture masks, synchronized texture assignments,
+  and cliff levels are decoded and validated. Primitive writes update synchronized files
+  in one transaction; every known component also has bounded validated raw access.
 - **Packed MPQ documents** (Phase 3). The `sc2mpq` sidecar opens, verifies, extracts,
   repacks, and reopens `.SC2Map`, `.SC2Mod`, and `.SC2Campaign` archives. Real ladder
   maps round-trip byte-identically, and authored output loads in the Galaxy Editor.
@@ -48,9 +52,9 @@ build-plan phase they complete.
   [docs/galaxy.md](docs/galaxy.md).
 - **No structural trigger editing.** Trigger names can be changed, but graph nodes and
   undocumented editor ids are not generated.
-- **No SC2Layout support.** Layout files are not parsed or edited.
-- **No terrain writing.** Height, texture, pathing, cliff, and water codecs are not
-  implemented.
+- **No high-level terrain authoring.** Primitive vertex and cell edits are supported, but
+  brushes, ramp construction, procedural terrain, and semantic water-body creation remain
+  roadmap work. Water and other advanced components have bounded validated raw access.
 - **No stock CASC dependency loading.** Local unpacked mods load, but Blizzard's stock
   mods remain inside the installation's CASC store.
 - **No automated in-game smoke test.** The server opens documents in the Galaxy Editor

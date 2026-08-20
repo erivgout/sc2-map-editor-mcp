@@ -82,18 +82,20 @@ export const IMPLEMENTED: ServerCapabilities = Object.freeze({
   // Phase 10. Text tables are line-oriented and reference nothing, so they are the
   // lowest-risk writable component in the document.
   localization: { read: true, write: true },
-  layout: { read: false, write: false },
+  // SC2Layout files use the same lossless XML spans as other document XML. The layout
+  // layer adds structural diagnostics, element search, creation, and targeted patches.
+  layout: { read: true, write: true },
   // Phase 15. Objects and Regions turned out to be plain XML rather than the binary
   // formats PLAN.md §27 anticipated, so neither reading nor writing needs reverse
   // engineering — edits splice bytes the same way GameData does. §27's round-trip gate has
   // been met: a map edited here repacks and reopens in the Galaxy Editor with the changes
-  // intact and no alerts. Terrain height is still not modelled, so a placed object's z is
-  // written exactly as given rather than snapped to the ground.
+  // intact and no alerts. Object placement does not auto-sample terrain, so a placed
+  // object's z is written exactly as given rather than snapped to the ground.
   objects: { read: true, write: true },
-  // Phase 16. Only the t3Terrain.xml descriptor is read. The bulk data (heights,
-  // texture masks, cell flags) is reported by four-character code, version, and size
-  // only — decoding it would be guesswork, which §28 forbids without validated codecs.
-  terrain: { read: true, write: false },
+  // Phase 16. Validated codecs cover the descriptor, rendering and synchronized heights,
+  // pathing flags, texture masks and synchronized texture data, and cliff levels. Every
+  // binary write is bounds-checked and committed with its synchronized counterpart.
+  terrain: { read: true, write: true },
   // Phase 13. Opening a document in the editor works; automatic test-map launching does
   // not exist, because no reliable mechanism for it has been verified (PLAN.md §29).
   editorLaunch: true,
@@ -137,10 +139,8 @@ export function deriveCapabilities(inputs: CapabilityInputs): ServerCapabilities
     // own parser handles it.
     triggers: { ...IMPLEMENTED.triggers },
     localization: { ...IMPLEMENTED.localization },
-    layout: {
-      read: IMPLEMENTED.layout.read && toolkitAvailable,
-      write: IMPLEMENTED.layout.write && toolkitAvailable,
-    },
+    // Layout parsing and lossless mutation are local and do not need the toolkit.
+    layout: { ...IMPLEMENTED.layout },
     objects: { ...IMPLEMENTED.objects },
     terrain: { ...IMPLEMENTED.terrain },
     editorLaunch: IMPLEMENTED.editorLaunch && editorAvailable,

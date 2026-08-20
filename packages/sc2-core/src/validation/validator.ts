@@ -21,6 +21,8 @@ import { SC2Error } from '../errors.js';
 import type { WalkedFile } from '../fs/index.js';
 import { GENERATED_MAP_SCRIPT, parseGalaxy, probeGalaxyToolkit } from '../galaxy/index.js';
 import { CatalogIndex } from '../gamedata/index.js';
+import { isLayoutPath, parseLayout } from '../layout/index.js';
+import { inspectTerrainFiles, TERRAIN_BINARY_FILENAMES, TERRAIN_FILENAME } from '../mapdata/index.js';
 import { parseTextTable, findTextTables } from '../text/index.js';
 import { TRIGGERS_FILENAME, parseTriggerData } from '../triggers/index.js';
 import { parseXml } from '../xml/parse.js';
@@ -141,6 +143,8 @@ export async function validateDocument(input: ValidateInput): Promise<Validation
   const byPath = new Map(input.files.map((file) => [file.relativePath.toLowerCase(), file]));
   const read = async (relativePath: string): Promise<string> =>
     readFile(path.join(input.workingPath, ...relativePath.split('/')), 'utf8');
+  const readBytes = async (relativePath: string): Promise<Uint8Array> =>
+    readFile(path.join(input.workingPath, ...relativePath.split('/')));
 
   // ---------------------------------------------------------------- archive
   // These checks are about the staged tree, which is a directory whatever the document was
@@ -213,7 +217,19 @@ export async function validateDocument(input: ValidateInput): Promise<Validation
   const xmlFiles = input.files.filter((file) => isXmlFile(file.relativePath));
   for (const file of xmlFiles) {
     try {
-      parseXml(await read(file.relativePath), { path: file.relativePath });
+      const source = await read(file.relativePath);
+      parseXml(source, { path: file.relativePath });
+      if (isLayoutPath(file.relativePath)) {
+        for (const diagnostic of parseLayout(source, file.relativePath).diagnostics) {
+          collector.add({
+            category: 'xml',
+            severity: diagnostic.severity,
+            code: 'SC2_VALIDATION_FAILED',
+            message: `${diagnostic.line}:${diagnostic.column} ${diagnostic.message}`,
+            path: diagnostic.path,
+          });
+        }
+      }
     } catch (error) {
       collector.add({
         category: 'xml',
@@ -465,13 +481,42 @@ export async function validateDocument(input: ValidateInput): Promise<Validation
     }
   }
 
-  // -------------------------------------------- categories this build cannot check
-  checks.terrain = {
-    status: 'unsupported',
-    reason: 'Terrain codecs are not implemented in this build; terrain was not checked at all.',
-    errorCount: 0,
-    warningCount: 0,
-  };
+  // --------------------------------------------------------------- terrain
+  const terrainFile = byPath.get(TERRAIN_FILENAME.toLowerCase());
+  if (terrainFile === undefined) {
+    checks.terrain = {
+      status: 'skipped',
+      reason: `This document has no ${TERRAIN_FILENAME} component.`,
+      errorCount: 0,
+      warningCount: 0,
+    };
+  } else {
+    try {
+      const files = new Map<string, Uint8Array>();
+      for (const terrainPath of TERRAIN_BINARY_FILENAMES) {
+        const file = byPath.get(terrainPath.toLowerCase());
+        if (file !== undefined) files.set(terrainPath, await readBytes(file.relativePath));
+      }
+      const inspected = inspectTerrainFiles(await read(terrainFile.relativePath), files);
+      for (const issue of inspected.issues) {
+        collector.add({
+          category: 'terrain',
+          severity: issue.severity,
+          code: 'SC2_VALIDATION_FAILED',
+          message: issue.message,
+          path: issue.path,
+        });
+      }
+    } catch (error) {
+      collector.add({
+        category: 'terrain',
+        severity: 'error',
+        code: error instanceof SC2Error ? error.code : 'SC2_PARSE_ERROR',
+        message: error instanceof Error ? error.message : 'Terrain data could not be decoded.',
+        path: terrainFile.relativePath,
+      });
+    }
+  }
 
   // Fill in every category that ran, from the findings actually collected.
   for (const category of VALIDATION_CATEGORIES) {

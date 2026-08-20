@@ -114,6 +114,20 @@ describe('TransactionEngine.run', () => {
     expect(applied.filesChanged[0]?.afterHash).toBe(preview.filesChanged[0]?.afterHash);
   });
 
+  it('writes binary files without UTF-8 conversion', async () => {
+    const content = Uint8Array.from([0x00, 0xff, 0x80, 0x41]);
+    const result = await harness.engine.run({
+      workspaceId: harness.workspaceId,
+      operation: 'binary-test',
+      dryRun: false,
+      summary: ['write binary bytes'],
+      files: [{ kind: 'write', path: 't3HeightMap', content }],
+    });
+
+    await expect(readFile(path.join(harness.workingPath, 't3HeightMap'))).resolves.toEqual(Buffer.from(content));
+    expect(result.filesChanged[0]).toMatchObject({ addedLines: 0, removedLines: 0, diff: null });
+  });
+
   it('reports a no-op without burning a revision or taking a snapshot', async () => {
     const current = await readFile(path.join(harness.workingPath, DOCUMENT_INFO_PATH), 'utf8');
 

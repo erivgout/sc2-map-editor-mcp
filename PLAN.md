@@ -1470,7 +1470,7 @@ Return:
     "triggers": "...",
     "localization": "...",
     "references": "...",
-    "terrain": "unsupported"
+    "terrain": "passed"
   }
 }
 ```
@@ -1887,12 +1887,12 @@ Example:
   "workspace": { "read": true, "write": true },
   "mpq": { "read": true, "write": true },
   "gamedata": { "read": true, "write": true, "inheritance": true },
-  "galaxy": { "read": true, "write": true, "typecheck": true },
+  "galaxy": { "read": true, "write": true, "typecheck": false },
   "triggers": { "read": true, "write": false },
   "localization": { "read": true, "write": true },
-  "layout": { "read": true, "write": false },
-  "objects": { "read": false, "write": false },
-  "terrain": { "read": false, "write": false },
+  "layout": { "read": true, "write": true },
+  "objects": { "read": true, "write": true },
+  "terrain": { "read": true, "write": true },
   "editorLaunch": true,
   "runtimeSmokeTest": false
 }
@@ -2097,10 +2097,10 @@ The model can implement nontrivial map logic and receive compiler-style diagnost
 
 ### Tasks
 
-- [ ] text write tools.
-- [ ] locale validation.
-- [ ] layout read/diagnostics.
-- [ ] targeted layout mutation after lossless writer support.
+- [x] text write tools.
+- [x] locale validation.
+- [x] layout read/diagnostics.
+- [x] targeted layout mutation after lossless writer support.
 
 ### Exit criteria
 
@@ -2195,15 +2195,16 @@ The model can place and move units/points/regions safely.
 
 ### Tasks
 
-- [ ] read codecs.
-- [ ] write codecs.
-- [ ] height sampling.
+- [x] read codecs.
+- [x] write codecs.
+- [x] height sampling.
 - [ ] height brush.
-- [ ] texture masks.
-- [ ] painted pathing.
-- [ ] cliffs/ramps.
-- [ ] water.
-- [ ] editor round-trip validation.
+- [x] texture masks.
+- [x] painted pathing.
+- [x] cliff-cell editing.
+- [ ] high-level ramp authoring.
+- [ ] semantic water-body authoring. Bounded validated raw access is available.
+- [x] editor round-trip validation.
 - [ ] procedural terrain utilities.
 
 ### Exit criteria

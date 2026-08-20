@@ -322,7 +322,7 @@ export class WorkspaceService {
       documentInfo,
       diagnostics,
       // Kept explicit and honest: these are Phase 5+ (PLAN.md §42).
-      notYetImplemented: ['catalogCounts', 'galaxyScripts', 'triggers', 'terrain'],
+      notYetImplemented: ['catalogCounts', 'galaxyScripts', 'triggers'],
     };
   }
 

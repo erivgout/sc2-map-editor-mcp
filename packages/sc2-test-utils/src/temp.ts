@@ -33,7 +33,7 @@ export async function createTempDir(prefix = 'sc2mcp-test-'): Promise<TempDir> {
 }
 
 /** Writes a `{ 'relative/path': contents }` map under `root`, creating directories. */
-export async function writeTree(root: string, files: Record<string, string>): Promise<void> {
+export async function writeTree(root: string, files: Record<string, string | Uint8Array>): Promise<void> {
   for (const [relativePath, contents] of Object.entries(files)) {
     const target = path.join(root, ...relativePath.split('/'));
     await mkdir(path.dirname(target), { recursive: true });

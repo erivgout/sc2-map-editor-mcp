@@ -24,8 +24,8 @@
  *
  * Object and region writes live in `mutate.ts`. Their codec passed an editor round trip,
  * so those operations preserve unknown XML while changing only the requested spans.
- * Terrain remains inspection-only. In particular, object placement does not sample the
- * height map, so callers must provide the intended z coordinate.
+ * Terrain codecs and mutations live in `terrain.ts`. Object placement still takes an
+ * explicit z coordinate so a caller can choose absolute height or a deliberate offset.
  */
 
 import { SC2Error } from '../errors.js';
@@ -190,7 +190,7 @@ export interface TerrainSummary {
  *
  * `t3Terrain.xml` is only the descriptor. The actual height, texture, cliff, and water
  * data lives in sibling binary files (`t3HeightMap`, `t3TextureMasks`, `t3CellFlags`,
- * the `t3Sync*` set) which this build does not decode — see {@link BINARY_TERRAIN_FILES}.
+ * the `t3Sync*` set). Their codecs live in `terrain.ts`.
  */
 export function parseTerrainSummary(source: string): TerrainSummary {
   const document = parseXml(source, { path: TERRAIN_FILENAME });
@@ -223,20 +223,20 @@ export function parseTerrainSummary(source: string): TerrainSummary {
 }
 
 /**
- * The binary terrain components, with the header facts that *are* safely determinable.
- *
- * Each begins with a byte-reversed four-character code and a version DWORD, read from the
- * shipped map at editor build 93333. Reporting magic, version, and size is honest
- * orientation; interpreting the payload would be guesswork, and PLAN.md §28 requires
- * validated codecs with round-trip tests before any of that.
+ * Binary terrain components and their observed file-order magic values.
  */
 export const BINARY_TERRAIN_FILES: Readonly<Record<string, { magic: string; observedVersion: number; description: string }>> =
   Object.freeze({
     t3HeightMap: { magic: 'HMAP', observedVersion: 101, description: 'Per-vertex terrain height' },
-    t3CellFlags: { magic: 'TCFL', observedVersion: 102, description: 'Per-cell flags (pathing, buildability)' },
+    t3CellFlags: { magic: 'LFCT', observedVersion: 102, description: 'Per-cell flags (pathing, buildability)' },
     t3Water: { magic: 'WATR', observedVersion: 110, description: 'Water planes' },
     t3HardTile: { magic: 'HRDT', observedVersion: 102, description: 'Hard-tile painting' },
-    t3FluffDoodad: { magic: 'TFLD', observedVersion: 103, description: 'Fluff doodad placement' },
+    t3FluffDoodad: { magic: 'DLFT', observedVersion: 103, description: 'Fluff doodad placement' },
+    t3TextureMasks: { magic: 'MASK', observedVersion: 102, description: 'Eight texture blend layers' },
+    t3VertCol: { magic: 'VTCL', observedVersion: 104, description: 'Terrain vertex colors' },
+    t3SyncHeightMap: { magic: 'SMAP', observedVersion: 102, description: 'Deterministic simulation heights' },
+    t3SyncCliffLevel: { magic: 'CLIF', observedVersion: 100, description: 'Deterministic cliff levels' },
+    t3SyncTextureInfo: { magic: 'RTXT', observedVersion: 101, description: 'Deterministic texture assignments' },
   });
 
 export interface BinaryComponentHeader {

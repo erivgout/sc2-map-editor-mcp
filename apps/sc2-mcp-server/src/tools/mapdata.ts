@@ -6,29 +6,24 @@
  * PLAN.md asks for has been run — a map edited here repacks and opens in the Galaxy
  * Editor with the changes intact.
  *
- * Terrain remains read-only. Its bulk data is a binary format whose layout has not been
- * established, and nothing here decodes it.
+ * Terrain tools live in `terrain.ts`, separate from placed-object XML operations.
  */
 
 import { readFile } from 'node:fs/promises';
 
 import type { McpServer } from '@modelcontextprotocol/server';
 import {
-  BINARY_TERRAIN_FILES,
   DOCUMENT_INFO_FILENAME,
   OBJECTS_FILENAME,
   REGIONS_FILENAME,
   SC2Error,
-  TERRAIN_FILENAME,
   addDependency,
   createRegion,
   deleteObject,
   deleteRegion,
   parsePlacedObjects,
   parseRegions,
-  parseTerrainSummary,
   placeObject,
-  readBinaryHeader,
   removeDependency,
   setDocumentInfoField,
   updateObject,
@@ -42,8 +37,7 @@ import { ok, toolHandler } from '../mcp-errors.js';
 
 const WorkspaceIdSchema = z.string().min(1).describe('Workspace id returned by sc2_open_document.');
 
-const READ_ONLY_NOTE =
-  'Regions and placed objects are writable; terrain bulk data is not decoded by this build.';
+const OBJECTS_NOTE = 'Regions and placed objects are both readable and writable in this build.';
 
 const MutationArgsShape = {
   workspace_id: WorkspaceIdSchema,
@@ -175,7 +169,7 @@ export function registerMapDataTools(server: McpServer, context: ServerContext):
           `PlacedObjects version ${document.version ?? 'unknown'}: ${[...document.countsByKind].map(([kind, count]) => `${kind} ${count}`).join(', ')}`,
           `${matched.length} matched; showing ${page.length}.`,
           ...page.map((object) => `  ${object.kind} ${object.type ?? '(untyped)'} [${object.id ?? '?'}] at ${object.position ?? '?'}`),
-          READ_ONLY_NOTE,
+          OBJECTS_NOTE,
         ].join('\n'),
         {
           version: document.version,
@@ -183,7 +177,7 @@ export function registerMapDataTools(server: McpServer, context: ServerContext):
           total: matched.length,
           objects: page,
           truncated: matched.length > page.length,
-          note: READ_ONLY_NOTE,
+          note: OBJECTS_NOTE,
         },
       );
     }),
@@ -222,81 +216,9 @@ export function registerMapDataTools(server: McpServer, context: ServerContext):
                 .map(([key, value]) => `${key}=${value}`)
                 .join(' ')}`,
           ),
-          READ_ONLY_NOTE,
+          OBJECTS_NOTE,
         ].join('\n'),
-        { regions: [...document.regions], note: READ_ONLY_NOTE },
-      );
-    }),
-  );
-
-  server.registerTool(
-    'sc2_get_terrain_summary',
-    {
-      title: 'Summarise the terrain',
-      description:
-        'Reads t3Terrain.xml — the terrain descriptor — for tile set, dimensions, scale, and cliff sets, and reports the header of each binary terrain file alongside it. The bulk data (heights, texture masks, cell flags) is NOT decoded: only its four-character code, version, and size are reported, which is what can be established without guessing. Dimensions are vertex counts, one more than the cell count in each direction.',
-      inputSchema: z.object({ workspace_id: WorkspaceIdSchema }),
-      outputSchema: z.object({
-        descriptor: z.object({
-          version: z.string().nullable(),
-          tileSet: z.string().nullable(),
-          dimensions: z.string().nullable(),
-          offset: z.string().nullable(),
-          scale: z.string().nullable(),
-          cliffSets: z.array(z.string()),
-          sections: z.array(z.string()),
-        }),
-        binaryComponents: z.array(
-          z.object({
-            path: z.string(),
-            sizeBytes: z.number().int(),
-            magic: z.string().nullable(),
-            magicReversed: z.string().nullable(),
-            version: z.number().int().nullable(),
-            known: z.boolean(),
-            description: z.string().nullable(),
-          }),
-        ),
-        note: z.string(),
-      }),
-      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-    },
-    toolHandler({ name: 'sc2_get_terrain_summary', logger }, async (args) => {
-      const descriptor = parseTerrainSummary(await readComponent(args.workspace_id, TERRAIN_FILENAME));
-
-      const staged = await workspaces.listFiles(args.workspace_id);
-      const binaryComponents = [];
-      for (const file of staged) {
-        const fileName = file.relativePath.split('/').pop() ?? '';
-        if (!(fileName in BINARY_TERRAIN_FILES)) continue;
-        const bytes = await readFile(file.absolutePath);
-        binaryComponents.push(readBinaryHeader(file.relativePath, bytes));
-      }
-      binaryComponents.sort((left, right) => left.path.localeCompare(right.path));
-
-      const note =
-        'Terrain bulk data is not decoded by this build. Heights, texture masks, and cell flags are reported only by four-character code, version, and size; nothing reads or writes their contents.';
-
-      return ok(
-        [
-          `Terrain descriptor version ${descriptor.version ?? 'unknown'}`,
-          `  tile set: ${descriptor.tileSet ?? 'unknown'}`,
-          `  dimensions (vertices): ${descriptor.dimensions ?? 'unknown'}`,
-          `  scale: ${descriptor.scale ?? 'unknown'}`,
-          descriptor.cliffSets.length === 0 ? '' : `  cliff sets: ${descriptor.cliffSets.join(', ')}`,
-          `  sections present: ${descriptor.sections.join(', ')}`,
-          '',
-          'Binary terrain components (headers only):',
-          ...binaryComponents.map(
-            (component) =>
-              `  ${component.path} — ${component.magic ?? '????'} (reversed ${component.magicReversed ?? '????'}) v${component.version ?? '?'} — ${component.sizeBytes} bytes${component.description === null ? '' : ` — ${component.description}`}`,
-          ),
-          '',
-          note,
-        ]
-          .filter((line, index, all) => !(line === '' && all[index - 1] === ''))
-          .join('\n'),
-        { descriptor, binaryComponents, note },
+        { regions: [...document.regions], note: OBJECTS_NOTE },
       );
     }),
   );

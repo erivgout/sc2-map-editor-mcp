@@ -47,7 +47,7 @@ import {
 
 /** A single file operation staged inside a transaction. */
 export type FileOperation =
-  | { readonly kind: 'write'; readonly path: string; readonly content: string }
+  | { readonly kind: 'write'; readonly path: string; readonly content: string | Uint8Array }
   | { readonly kind: 'delete'; readonly path: string };
 
 export interface TransactionOptions {
@@ -498,10 +498,10 @@ export class TransactionEngine {
     suppressDiffs: boolean,
   ): Promise<{
     changed: ChangedFile[];
-    operations: { kind: 'write' | 'delete'; absolutePath: string; content: string; existedBefore: boolean }[];
+    operations: { kind: 'write' | 'delete'; absolutePath: string; content: string | Uint8Array; existedBefore: boolean }[];
   }> {
     const changed: ChangedFile[] = [];
-    const operations: { kind: 'write' | 'delete'; absolutePath: string; content: string; existedBefore: boolean }[] = [];
+    const operations: { kind: 'write' | 'delete'; absolutePath: string; content: string | Uint8Array; existedBefore: boolean }[] = [];
     const seen = new Set<string>();
 
     for (const file of files) {
@@ -545,19 +545,20 @@ export class TransactionEngine {
         continue;
       }
 
-      const afterBuffer = Buffer.from(file.content, 'utf8');
+      const isBinary = typeof file.content !== 'string';
+      const afterBuffer = isBinary ? Buffer.from(file.content) : Buffer.from(file.content, 'utf8');
       // Writing identical bytes is not a change; dropping it here is what makes a
       // "set this to what it already is" call report honestly instead of bumping a revision.
       if (beforeBuffer?.equals(afterBuffer) === true) continue;
 
-      const diff = diffText(file.path, beforeBuffer?.toString('utf8') ?? '', file.content);
+      const diff = isBinary ? null : diffText(file.path, beforeBuffer?.toString('utf8') ?? '', file.content);
       changed.push({
         path: file.path,
         beforeHash: beforeBuffer === null ? null : hashBuffer(beforeBuffer),
         afterHash: hashBuffer(afterBuffer),
-        addedLines: diff.addedLines,
-        removedLines: diff.removedLines,
-        diff: suppressDiffs ? null : formatUnifiedDiff(diff) || null,
+        addedLines: diff?.addedLines ?? 0,
+        removedLines: diff?.removedLines ?? 0,
+        diff: suppressDiffs || diff === null ? null : formatUnifiedDiff(diff) || null,
       });
       operations.push({ kind: 'write', absolutePath, content: file.content, existedBefore });
     }

@@ -160,30 +160,35 @@ get wrong here: assuming either convention misreads half the files.
 | `MapInfo` | `49 70 61 4D` | `IpaM` | `MapI` | **reversed** | 39 (version) |
 | `DocumentHeader` | `48 32 43 53` | `H2CS` | `SC2H` | **reversed** | 8 (version) |
 | `t3HeightMap` | `48 4D 41 50` | `HMAP` | `PAMH` | **in order** | 101 |
-| `t3CellFlags` | — | `TCFL` | — | in order | 102 |
+| `t3CellFlags` | — | `LFCT` | — | in order | 102 |
 | `t3Water` | — | `WATR` | — | in order | 110 |
 | `t3HardTile` | — | `HRDT` | — | in order | 102 |
-| `t3FluffDoodad` | — | `TFLD` | — | in order | 103 |
+| `t3FluffDoodad` | — | `DLFT` | — | in order | 103 |
 
 `readBinaryHeader` therefore reports both forms rather than picking one.
 
-`MapInfo` version 39 is what editor build 97563 writes. PLAN.md §24 requires a validated
-codec and version gating before any binary write; nothing here is enough to write these.
+`MapInfo` version 39 is what editor build 97563 writes. `MapInfo` remains header-only and
+is not writable. Terrain has separate version-gated codecs described in
+[terrain.md](terrain.md).
 
 ---
 
 ## `t3Terrain.xml`
 
-XML, `<terrain version="115">`. The sample's height map is `dim="257 257"` — i.e.
-(cells + 1) in each direction — with `tileSet="Zerus"` and a `<cliffSetList>`. The bulk of
-terrain data lives in the sibling binary files (`t3HeightMap`, `t3CellFlags`,
-`t3TextureMasks`, and the `t3Sync*` set), which are **not yet analysed**.
+XML, `<terrain version="115">`. The sample's height map is `dim="257 257"`, which is one
+vertex wider and taller than the cell grid, with `tileSet="Zerus"` and a
+`<cliffSetList>`. The sibling binary formats are now decoded and size-checked:
 
-Sizes from the sample are a useful sanity check for any future codec:
-`t3TextureMasks` is 16,777,280 bytes (= 16 MiB + 64), `t3HeightMap` 396,326,
-`t3SyncHeightMap` 264,260, `t3SyncCliffLevel` 131,104, `t3CellFlags` 65,568. The recurring
-`+ 64` and `+ 32` offsets suggest a fixed header ahead of a flat array — **inferred, not
-verified**.
+- `t3HeightMap`: 32-byte header, then six bytes per vertex.
+- `t3CellFlags`: 32-byte header, then one byte per terrain cell.
+- `t3TextureMasks`: 64-byte header and eight tiled four-bit texture layers.
+- `t3SyncHeightMap`: 64-byte header, then two 16-bit values per vertex.
+- `t3SyncCliffLevel`: 32-byte header, then one 16-bit value per cell.
+- `t3SyncTextureInfo`: versioned name table, then four or eight bytes per cell.
+
+The parser checks magic, supported versions, exact lengths, and dimensions against the
+descriptor before exposing a write. Details and the editor round-trip evidence are in
+[terrain.md](terrain.md).
 
 ---
 

@@ -24,14 +24,14 @@ the sidecar binary is not there.
 | Localized text | ✅ | ✅ | BOM and CRLF preserved exactly. |
 | Galaxy scripts | ✅ | ✅ | Syntax only — see below. Needs the vendored toolkit built. |
 | Triggers | ✅ | ⚠️ | Structure and names readable; **renaming only**. |
+| SC2Layout | ✅ | ✅ | List, read, structurally diagnose, search, create, and losslessly patch. |
 | Placed objects (`Objects`) | ✅ | ✅ | XML, not binary. Place, move, delete; terrain height is not consulted. |
 | Regions | ✅ | ✅ | XML, not binary. Create, move, rename, delete. |
-| Terrain | ⚠️ | ❌ | Descriptor only; bulk data reported by header, never decoded. |
+| Terrain | ✅ | ✅ | Typed height, texture, pathing, and cliff operations; bounded validated access to every known component. |
 | MPQ archives | ✅ | ✅ | Byte-identical round trips on real ladder maps; repacked maps open in the editor. |
 | Local dependency archives | ✅ | ❌ | Unpacked `.SC2Mod` directories are indexed; contents are read-only. |
 | Stock (CASC) dependencies | ❌ | ❌ | Need a CASC reader; reported as `in-casc`, not missing. |
 | `Attributes`, `CustomAI` | ❌ | ❌ | XML, but not modelled. |
-| SC2Layout | ❌ | ❌ | Not started. |
 | `MapInfo` (binary) | ❌ | ❌ | Magic and version only. |
 
 ## Why each gap exists
@@ -62,10 +62,9 @@ editor-internal identifiers whose allocation rules are not documented anywhere r
 Renaming is the one write, and it is safe precisely because it edits `TriggerStrings.txt`
 rather than the trigger data.
 
-**Placed objects and regions: writable. Terrain: not.** PLAN.md §27 required a codec
-validated by an editor round trip before any write, and that has now been run — a real map
-had a region and a unit added through these tools, was repacked, and opened in the Galaxy
-Editor with no alerts and the edits intact.
+**Placed objects and regions.** PLAN.md §27 required editor round-trip validation before
+any write. A real map had a region and unit added through these tools, was repacked, and
+opened in the Galaxy Editor with the edits intact.
 
 Two things are still not modelled, and both are stated at the tool rather than assumed
 away. Terrain height is not consulted, so a placed object's `z` is written exactly as given
@@ -76,10 +75,27 @@ The convention that types are named `UnitType` on `<ObjectUnit>` but `Type` on p
 doodads was taken from 181 real entries in editor output, not assumed — reading only `Type`
 had been reporting every placed unit in a real map as untyped.
 
-**Terrain bulk data.** `t3Terrain.xml` is a readable descriptor. The height map, texture
-masks, cell flags, and sync data are binary formats whose layouts have not been
-established. Their four-character code, version, and size are reported because those are
-observable facts; nothing is inferred about the payload.
+**SC2Layout.** Layout support uses the repository's span-tracking XML parser, so targeted
+changes preserve all bytes outside the selected element or attribute. The server can list,
+read, structurally diagnose, search, create, and patch `.SC2Layout` files without the
+optional Galaxy toolkit. A created and patched layout survived MPQ repacking, loaded in the
+Galaxy Editor without a layout alert, and remained present after the editor saved the map.
+
+**Terrain bulk data.** The server decodes `t3Terrain.xml`, rendering and synchronized
+heights, cell flags, eight texture-mask layers, synchronized texture assignments, and
+cliff levels. A height write updates `t3HeightMap` and `t3SyncHeightMap` in one transaction;
+texture and cliff writes do the same for their synchronized counterparts. Advanced water,
+hard-tile, fluff, and vertex-color data can be read and patched as bounded bytes. The file
+length cannot change; documented magic and versions are checked, while fully decoded
+components also check dimensions and exact expected length. See
+[terrain.md](terrain.md) for the exact versions and invariants.
+
+The terrain codecs pass synthetic corruption and mutation tests, decode Blizzard's
+installed editor test map, and passed a packed-map editor cycle: edit, validate, repack,
+reopen through MCP, open in the Galaxy Editor, save there, then reopen and validate again.
+Primitive cell and vertex editing is available now. High-level brushes, ramp construction,
+and semantic water-body generation remain roadmap work rather than hidden capability
+claims.
 
 **Dependency archives: local ones load, stock ones cannot.** A dependency that resolves to
 an unpacked directory - a user's own `.SC2Mod` beside their map - is loaded, and its
@@ -112,8 +128,9 @@ runs whenever the vendored toolkit is built, and checks authored scripts for syn
 graph to confirm it reads, which is not the same as judging what the triggers do. `archive`
 checks the staged tree for the things that only become fatal once it is packed, such as two
 paths differing solely in case; the packed bytes themselves are verified at commit, by
-reopening the archive and reading every member. `terrain` is the one category that is
-genuinely unsupported everywhere, because no codec for the bulk data exists.
+reopening the archive and reading every member. `terrain` decodes and cross-validates every
+required terrain component when `t3Terrain.xml` is present, and reports `skipped` when a
+document has no terrain component.
 
 These used to be hardcoded to `unsupported` with reasons that had stopped being true — the
 report claimed the MPQ helper and the Galaxy parser were absent on builds that had both.
