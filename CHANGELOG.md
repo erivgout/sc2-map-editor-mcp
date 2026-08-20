@@ -43,8 +43,10 @@ build-plan phase they complete.
   backup.
 - **High-level authoring** (Phases 14, §45). Unit-from-template and shared-object
   isolation, so changing one unit's weapon cannot silently change twenty others.
-- **Editor integration** (Phase 13). Open a document in the Galaxy Editor; read its logs;
-  locate the user's Maps folder through the registry.
+- **Editor and runtime integration** (Phase 13). Open a document in the Galaxy Editor;
+  launch packed maps or staged workspace trees through the same SC2Switcher protocol as
+  Test Document; identify the real game process; read editor and per-run game logs; locate
+  the user's Maps folder through the registry.
 
 ### Known gaps
 
@@ -57,8 +59,6 @@ build-plan phase they complete.
   roadmap work. Water and other advanced components have bounded validated raw access.
 - **No stock CASC dependency loading.** Local unpacked mods load, but Blizzard's stock
   mods remain inside the installation's CASC store.
-- **No automated in-game smoke test.** The server opens documents in the Galaxy Editor
-  and reads its logs, but it does not claim an unverified test-map launch path.
 
 Full detail: [docs/capabilities.md](docs/capabilities.md).
 

@@ -10,7 +10,15 @@
  */
 
 import type { McpServer } from '@modelcontextprotocol/server';
-import { SC2Error, findSc2DocumentsFolder, launchEditor, listEditorLogs, readEditorLog } from '@sc2mcp/core';
+import {
+  SC2Error,
+  findSc2DocumentsFolder,
+  launchEditor,
+  listEditorLogs,
+  parseSc2AlertDiagnostics,
+  readEditorLog,
+  RUNTIME_TEST_MAP_NAME,
+} from '@sc2mcp/core';
 import { z } from 'zod';
 
 import type { ServerContext } from '../context.js';
@@ -24,7 +32,7 @@ export function registerEditorTools(server: McpServer, context: ServerContext): 
     {
       title: 'Open a document in the Galaxy Editor',
       description:
-        'Starts the StarCraft II Editor with a document open. This opens a window on the user\'s machine and leaves it running independently of this server. Use it to confirm a committed document actually loads — that is the only check that proves an edit did not corrupt anything. Automatic test-map launching is NOT provided: no reliable command-line mechanism for it has been verified against the current client, so this server will not pretend to offer one.',
+        'Starts the StarCraft II Editor with a document open. This opens a window on the user\'s machine and leaves it running independently of this server. Use it to inspect a staged or committed document. Use sc2_test_document when the map must actually run in StarCraft II.',
       inputSchema: z.object({
         document_path: z
           .string()
@@ -65,7 +73,7 @@ export function registerEditorTools(server: McpServer, context: ServerContext): 
 
       const result = launchEditor({
         installation,
-        documentPath: documentPath ?? '',
+        documentPath,
       });
 
       const note =
@@ -78,6 +86,213 @@ export function registerEditorTools(server: McpServer, context: ServerContext): 
           '\n',
         ),
         { executablePath: result.executablePath, documentPath, pid: result.pid, note },
+      );
+    }),
+  );
+
+  server.registerTool(
+    'sc2_test_document',
+    {
+      title: 'Run a map through StarCraft II Test Document',
+      description:
+        'Stages one .SC2Map in the installation-owned Maps\\Test area, writes the editor-compatible test configuration, invokes SC2Switcher, and waits until the real SC2 game process appears. This opens StarCraft II on the user\'s machine. Only one game client may be running so the process can be identified reliably. Call sc2_get_last_test_log for status and GameLogs diagnostics.',
+      inputSchema: z.object({
+        document_path: z
+          .string()
+          .optional()
+          .describe('Absolute path of a packed or unpacked .SC2Map inside an allowed root.'),
+        workspace_id: z
+          .string()
+          .optional()
+          .describe('Test this workspace\'s current staging copy, including uncommitted edits.'),
+        startup_timeout_ms: z.number().int().min(1_000).max(60_000).optional(),
+      }),
+      outputSchema: z.object({
+        runId: z.string(),
+        startedAt: z.string(),
+        sourceDocumentPath: z.string(),
+        stagedDocumentPath: z.string(),
+        configPath: z.string(),
+        executablePath: z.string(),
+        launcherPid: z.number().int().nullable(),
+        gamePid: z.number().int(),
+        status: z.enum(['running', 'exited']),
+        note: z.string(),
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    },
+    toolHandler({ name: 'sc2_test_document', logger }, async (args) => {
+      const installation = context.selectedInstallation;
+      if (installation === null) {
+        throw new SC2Error('SC2_EDITOR_NOT_FOUND', 'No unambiguous StarCraft II installation was detected.', {
+          recoverable: true,
+          suggestedAction: 'Run sc2_detect_installations, then set "sc2InstallPath" in the configuration.',
+        });
+      }
+      if (args.workspace_id !== undefined && args.document_path !== undefined) {
+        throw new SC2Error('SC2_INVALID_ARGUMENT', 'Pass workspace_id or document_path, not both.', {
+          recoverable: true,
+        });
+      }
+      if (args.workspace_id === undefined && args.document_path === undefined) {
+        throw new SC2Error('SC2_INVALID_ARGUMENT', 'Pass workspace_id or document_path.', { recoverable: true });
+      }
+
+      let documentPath: string;
+      let documentIsMap = false;
+      if (args.workspace_id !== undefined) {
+        const descriptor = await workspaces.getDescriptor(args.workspace_id);
+        if (descriptor.documentKind !== 'map') {
+          throw new SC2Error('SC2_INVALID_ARGUMENT', 'Only map workspaces can be run in StarCraft II.', {
+            workspaceId: descriptor.id,
+            recoverable: true,
+            context: { documentKind: descriptor.documentKind },
+          });
+        }
+        documentPath = descriptor.stagingPath;
+        documentIsMap = true;
+      } else {
+        documentPath = await pathGuard.resolve(args.document_path ?? '', { mode: 'must-exist' });
+      }
+
+      const documentsBefore = await findSc2DocumentsFolder();
+      const gameLogNamesBefore =
+        documentsBefore === null
+          ? []
+          : (await listEditorLogs(documentsBefore.gameLogs, 1_000)).map((entry) => entry.name);
+      const run = await context.runtimeTests.launch({
+        installation,
+        documentPath,
+        startupTimeoutMs: args.startup_timeout_ms ?? Math.min(config.processTimeoutMs, 30_000),
+        maxFiles: config.maxExtractedFiles,
+        maxSingleFileBytes: config.maxSingleFileBytes,
+        documentIsMap,
+        gameLogNamesBefore,
+      });
+      const note =
+        'StarCraft II accepted the test launch and began loading the staged map. Inspect gameplay as needed and call sc2_get_last_test_log for status and alerts.';
+
+      return ok(`Started runtime test ${run.id} in StarCraft II (game pid ${run.gamePid}).\n${note}`, {
+        runId: run.id,
+        startedAt: run.startedAt,
+        sourceDocumentPath: run.sourceDocumentPath,
+        stagedDocumentPath: run.stagedDocumentPath,
+        configPath: run.configPath,
+        executablePath: run.executablePath,
+        launcherPid: run.launcherPid,
+        gamePid: run.gamePid,
+        status: run.status,
+        note,
+      });
+    }),
+  );
+
+  server.registerTool(
+    'sc2_get_last_test_log',
+    {
+      title: 'Get the last StarCraft II test status and logs',
+      description:
+        'Returns the last runtime test process status, GameLogs created for that launch, the newest Alerts log, and parsed alert messages. Use this after sc2_test_document to distinguish a running client, a clean exit, and map/runtime diagnostics.',
+      inputSchema: z.object({}),
+      outputSchema: z.object({
+        run: z
+          .object({
+            runId: z.string(),
+            startedAt: z.string(),
+            sourceDocumentPath: z.string(),
+            stagedDocumentPath: z.string(),
+            configPath: z.string(),
+            executablePath: z.string(),
+            launcherPid: z.number().int().nullable(),
+            gamePid: z.number().int(),
+            status: z.enum(['running', 'exited']),
+          })
+          .nullable(),
+        gameLogsRoot: z.string().nullable(),
+        logs: z.array(
+          z.object({
+            name: z.string(),
+            sizeBytes: z.number().int(),
+            modifiedAt: z.string(),
+            kind: z.string(),
+            isDirectory: z.boolean(),
+          }),
+        ),
+        diagnostics: z.array(
+          z.object({ severity: z.enum(['error', 'warning', 'info']), channel: z.string(), message: z.string() }),
+        ),
+        alertsContent: z.string().nullable(),
+        note: z.string(),
+      }),
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    toolHandler({ name: 'sc2_get_last_test_log', logger }, async () => {
+      const run = context.runtimeTests.getLastRun();
+      if (run === null) {
+        const note = 'No runtime test has been launched by this server process.';
+        return ok(note, {
+          run: null,
+          gameLogsRoot: null,
+          logs: [],
+          diagnostics: [],
+          alertsContent: null,
+          note,
+        });
+      }
+
+      const documents = await findSc2DocumentsFolder();
+      const allLogs = documents === null ? [] : await listEditorLogs(documents.gameLogs, 100);
+      const threshold = Date.parse(run.startedAt) - 2_000;
+      const previousNames = new Set(run.gameLogNamesBefore);
+      const logs = allLogs
+        .filter((entry) => !previousNames.has(entry.name) && Date.parse(entry.modifiedAt) >= threshold)
+        .slice(0, 20);
+      let alertsContent: string | null = null;
+      for (const alerts of logs.filter((entry) => entry.kind.toLowerCase() === 'alerts' && !entry.isDirectory)) {
+        const candidate = await readEditorLog(alerts.path);
+        if (candidate.includes(RUNTIME_TEST_MAP_NAME)) {
+          alertsContent = candidate;
+          break;
+        }
+      }
+      const diagnostics = alertsContent === null ? [] : parseSc2AlertDiagnostics(alertsContent);
+      const note =
+        run.status === 'running'
+          ? 'The StarCraft II test process is still running.'
+          : alertsContent === null
+            ? 'The StarCraft II test process exited. No Alerts log was found for this launch.'
+            : `The StarCraft II test process exited. Parsed ${diagnostics.length} alert message(s).`;
+
+      return ok(
+        [
+          `Runtime test ${run.id}: ${run.status} (game pid ${run.gamePid}).`,
+          ...diagnostics.map((entry) => `${entry.severity.toUpperCase()} [${entry.channel}] ${entry.message}`),
+          note,
+        ].join('\n'),
+        {
+          run: {
+            runId: run.id,
+            startedAt: run.startedAt,
+            sourceDocumentPath: run.sourceDocumentPath,
+            stagedDocumentPath: run.stagedDocumentPath,
+            configPath: run.configPath,
+            executablePath: run.executablePath,
+            launcherPid: run.launcherPid,
+            gamePid: run.gamePid,
+            status: run.status,
+          },
+          gameLogsRoot: documents?.gameLogs ?? null,
+          logs: logs.map((entry) => ({
+            name: entry.name,
+            sizeBytes: entry.sizeBytes,
+            modifiedAt: entry.modifiedAt,
+            kind: entry.kind,
+            isDirectory: entry.isDirectory,
+          })),
+          diagnostics,
+          alertsContent,
+          note,
+        },
       );
     }),
   );

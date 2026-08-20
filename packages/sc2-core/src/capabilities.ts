@@ -61,7 +61,7 @@ export const IMPLEMENTED: ServerCapabilities = Object.freeze({
   // Six real ladder maps extract, repack, verify, and re-extract byte-identically (every
   // member's SHA-256 matches). The full open -> edit -> commit -> reopen cycle passes on a
   // real packed map, and repacked output has been opened successfully in the Galaxy
-  // Editor. Automatic in-game execution remains a separate, unsupported capability.
+  // Editor. In-game execution is reported separately by `runtimeSmokeTest` below.
   mpq: { read: true, write: true },
   // Phase 6. Read and parent-chain inheritance work against the document's own catalogs.
   //
@@ -96,11 +96,11 @@ export const IMPLEMENTED: ServerCapabilities = Object.freeze({
   // pathing flags, texture masks and synchronized texture data, and cliff levels. Every
   // binary write is bounds-checked and committed with its synchronized counterpart.
   terrain: { read: true, write: true },
-  // Phase 13. Opening a document in the editor works; automatic test-map launching does
-  // not exist, because no reliable mechanism for it has been verified (PLAN.md §29).
+  // Phase 13. Opens packed or unpacked documents in the Galaxy Editor.
   editorLaunch: true,
-  // Phase 13 / PLAN.md §30.
-  runtimeSmokeTest: false,
+  // Phase 13 / PLAN.md §29. Mirrors the Test Document process path observed on editor
+  // 5.0.16: bounded staging, SC2TestConfig, SC2Switcher, game-process detection, and logs.
+  runtimeSmokeTest: true,
 });
 
 /** Runtime facts about this machine that gate otherwise-implemented capabilities. */
@@ -109,6 +109,8 @@ export interface CapabilityInputs {
   readonly mpqHelperAvailable: boolean;
   /** A StarCraft II installation with an editor executable was resolved. */
   readonly editorAvailable: boolean;
+  /** The selected installation has SC2Switcher and a current game executable. */
+  readonly runtimeLauncherAvailable: boolean;
   /** The vendored Galaxy Toolkit adapter loaded successfully. */
   readonly toolkitAvailable: boolean;
 }
@@ -120,7 +122,7 @@ export interface CapabilityInputs {
  * the model is told the truth about this process, not about the codebase.
  */
 export function deriveCapabilities(inputs: CapabilityInputs): ServerCapabilities {
-  const { mpqHelperAvailable, editorAvailable, toolkitAvailable } = inputs;
+  const { mpqHelperAvailable, editorAvailable, runtimeLauncherAvailable, toolkitAvailable } = inputs;
   return {
     workspace: { ...IMPLEMENTED.workspace },
     mpq: {
@@ -144,6 +146,6 @@ export function deriveCapabilities(inputs: CapabilityInputs): ServerCapabilities
     objects: { ...IMPLEMENTED.objects },
     terrain: { ...IMPLEMENTED.terrain },
     editorLaunch: IMPLEMENTED.editorLaunch && editorAvailable,
-    runtimeSmokeTest: IMPLEMENTED.runtimeSmokeTest && editorAvailable,
+    runtimeSmokeTest: IMPLEMENTED.runtimeSmokeTest && runtimeLauncherAvailable,
   };
 }

@@ -10,6 +10,7 @@
 import {
   MpqHelper,
   PathGuard,
+  RuntimeTestService,
   WorkspaceService,
   WorkspaceStore,
   createLogger,
@@ -40,6 +41,8 @@ export interface ServerContext {
   readonly selectedInstallation: Sc2Installation | null;
   /** Result of the startup probe for the `sc2mpq` sidecar, including why it is absent. */
   readonly mpqHelper: HelperProbe;
+  /** Shared across protocol-era server instances so the last test remains queryable. */
+  readonly runtimeTests: RuntimeTestService;
   readonly capabilities: ServerCapabilities;
 }
 
@@ -123,8 +126,11 @@ export async function createContext(options: CreateContextOptions): Promise<Serv
   const capabilities = deriveCapabilities({
     mpqHelperAvailable: mpqHelper.available,
     editorAvailable: selectedInstallation?.editorPath != null,
+    runtimeLauncherAvailable:
+      selectedInstallation?.switcherPath != null && selectedInstallation.gameExecutablePath != null,
     toolkitAvailable: toolkit.available,
   });
+  const runtimeTests = new RuntimeTestService();
 
   if (config.allowedRoots.length === 0) {
     logger.warn('no allowed roots configured; every path-taking tool will refuse', {
@@ -140,5 +146,15 @@ export async function createContext(options: CreateContextOptions): Promise<Serv
     selectedInstallation: selectedInstallation?.path ?? null,
   });
 
-  return { config, logger, pathGuard, workspaces, installations, selectedInstallation, mpqHelper, capabilities };
+  return {
+    config,
+    logger,
+    pathGuard,
+    workspaces,
+    installations,
+    selectedInstallation,
+    mpqHelper,
+    runtimeTests,
+    capabilities,
+  };
 }

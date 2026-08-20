@@ -25,7 +25,7 @@ answer for a running build. As of now:
 | SC2Layout | ✅ | ✅ | List, read, diagnose, search, create, and losslessly patch layout elements |
 | Placed objects / regions | ✅ | ✅ | Both are XML, not binary. Place, move, delete — round-tripped through the editor. Terrain height is not consulted |
 | Terrain | ✅ | ✅ | Typed height, texture, pathing, and cliff reads/writes, synchronized-file updates, validation, and bounded raw component access. See [docs/terrain.md](docs/terrain.md) |
-| Editor launch | ✅ | n/a | Opens a document in the Galaxy Editor; reads its logs. Automatic **test-map launching is not provided** — no reliable mechanism verified |
+| Editor/test launch | ✅ | n/a | Opens documents in the Galaxy Editor, launches packed maps or staged workspace maps through the installed client, and reports editor/game logs |
 
 Why the gaps are where they are, and what "⚠️" means in each row:
 [docs/capabilities.md](docs/capabilities.md).
@@ -41,6 +41,14 @@ is indexed, and its objects become visible for inheritance and references - read
 this server never modifies dependency archives. Blizzard's stock mods live inside the
 installation's CASC store, which this build cannot read; they are reported as `in-casc`
 rather than missing, because that is a very different thing from your map being broken.
+
+**Editor and in-game testing.** `sc2_launch_editor` opens a packed document, a workspace's
+staged copy, or a blank Galaxy Editor. `sc2_test_document` accepts a packed `.SC2Map` or a
+map workspace, copies it to the installation-owned `Maps\Test` area without changing the
+source, and launches it through the editor-compatible SC2Switcher workflow. It refuses to
+start if another StarCraft II client is running. After launch, `sc2_get_last_test_log`
+reports whether the game is still running and returns the GameLogs and parsed Alerts for
+that specific run.
 
 ### Tools
 
@@ -73,6 +81,8 @@ rather than missing, because that is a very different thing from your map being 
 | `sc2_find_missing_localization` | yes | Catalog objects with no display name |
 | `sc2_launch_editor` | no | Open a document in the Galaxy Editor to confirm it loads |
 | `sc2_get_editor_logs` | yes | List or read the editor's own logs |
+| `sc2_test_document` | no | Stage and launch a map through the editor-compatible SC2Switcher workflow |
+| `sc2_get_last_test_log` | yes | Running/exited status, game logs, and parsed Alerts messages for the last test |
 | `sc2_get_user_maps` | yes | The user's Maps folder, resolved through the registry |
 | `sc2_list_galaxy_files` | yes | Scripts in the document; flags the generated MapScript |
 | `sc2_get_galaxy_file` | yes | Read a script, optionally by line range |

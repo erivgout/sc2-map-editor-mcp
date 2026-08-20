@@ -102,18 +102,39 @@ Unchanged from PLAN.md §6. Recorded here so the trade-off is captured in one pl
 a crashing native addon takes the whole MCP server down, whereas a crashing sidecar
 is a non-zero exit code and a structured error.
 
+### D6: Runtime tests use SC2Switcher and the editor's staging protocol
+
+On 2026-08-20, Test Document was traced on editor 5.0.16 / build 97563. The editor
+copied the current map to `Maps\Test\EditorTest.SC2Map`, wrote
+`EditorTest.SC2TestConfig`, and invoked `Support64\SC2Switcher_x64.exe`. The switcher
+started the current build's `SC2_x64.exe` with this argument shape:
+
+```text
+-run Test\EditorTest.SC2Map -displaymode 2 -preload 1 -NoUserCheats -reloadcheck
+-meleeMod Void -difficulty 2 -speed 2 -testconfig <absolute-config-path>
+```
+
+Launching `SC2_x64.exe` directly with an absolute map path exited before opening a game
+window. Launching the same relative staged map through SC2Switcher produced the game
+process and loaded the document. The MCP therefore mirrors that protocol with its own
+fixed `SC2MCPTest` map and config names. It does not automate the editor UI.
+
+The resulting implementation was verified with a packed map and with an unpacked map
+copied from an extensionless workspace staging directory. Both were launched through the
+built MCP boundary and accepted by the installed game client.
+
 ## Consequences
 
 - The lint/typecheck toolchain is one major version behind TypeScript `latest`. This
   is tracked and intentional (D1).
-- Installation discovery has a documented Windows-specific complication (OneDrive
-  Documents redirection) that must be handled in Phase 13, and that CI can never
-  exercise.
+- Installation discovery handles the Windows-specific OneDrive Documents redirection.
+  CI covers the path logic; only the installed-client cycle remains machine-specific.
 - `vendor/` and `native/**/third_party/` are gitignored, so a fresh clone is not
   buildable end-to-end until `scripts/bootstrap.ps1` has run.
 
-## Open questions deferred to later phases
+## Resolved questions from later phases
 
-- Whether a StormLib-repacked, otherwise-unchanged map loads in editor 5.0.16 —
-  Phase 3 exit criterion, requires self-authored fixtures that do not exist yet.
-- The reliable local test-map launch mechanism (PLAN.md §29) — Phase 13.
+- StormLib-repacked maps load in editor 5.0.16. Phase 3 validated byte-identical
+  round trips on six ladder maps and an MCP-authored packed-map editor cycle.
+- The reliable local test-map launch mechanism is SC2Switcher plus the observed Test
+  Document staging/config protocol (D6, Phase 13).

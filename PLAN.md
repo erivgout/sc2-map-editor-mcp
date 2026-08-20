@@ -1894,7 +1894,7 @@ Example:
   "objects": { "read": true, "write": true },
   "terrain": { "read": true, "write": true },
   "editorLaunch": true,
-  "runtimeSmokeTest": false
+  "runtimeSmokeTest": true
 }
 ```
 
@@ -1919,7 +1919,7 @@ Tools whose required backend is unavailable should not be falsely advertised as 
 - [ ] Confirm current editor can load a StormLib-repacked unchanged map.
 - [ ] Document file-list differences.
 - [ ] Determine reliable SC2 installation/editor discovery.
-- [ ] Determine reliable local test-map launch method.
+- [x] Determine reliable local test-map launch method.
 - [ ] Record unsupported/unknown formats.
 
 ### Exit criteria
@@ -2144,12 +2144,12 @@ A simple GUI trigger can be created by MCP and opened successfully in the editor
 
 ### Tasks
 
-- [ ] detect install.
-- [ ] launch editor.
-- [ ] open staged/output document.
-- [ ] implement verified test-map workflow.
-- [ ] collect process/log diagnostics.
-- [ ] optional runtime API smoke test.
+- [x] detect install.
+- [x] launch editor.
+- [x] open staged/output document.
+- [x] implement verified test-map workflow.
+- [x] collect process/log diagnostics.
+- [x] runtime smoke test through the installed client; no separate runtime API required.
 
 ### Exit criteria
 

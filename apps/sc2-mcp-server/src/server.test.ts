@@ -200,6 +200,7 @@ describe('MCP server', () => {
       'sc2_get_galaxy_diagnostics',
       'sc2_get_galaxy_file',
       'sc2_get_galaxy_symbols',
+      'sc2_get_last_test_log',
       'sc2_get_layout',
       'sc2_get_layout_diagnostics',
       'sc2_get_server_info',
@@ -246,6 +247,7 @@ describe('MCP server', () => {
       'sc2_set_terrain_texture',
       'sc2_set_text_value',
       'sc2_set_unit_weapon_damage',
+      'sc2_test_document',
       'sc2_update_object',
       'sc2_update_region',
       'sc2_validate_document',
@@ -268,6 +270,8 @@ describe('MCP server', () => {
     expect(byName.get('sc2_discard_workspace')?.annotations?.destructiveHint).toBe(true);
     expect(byName.get('sc2_get_server_info')?.annotations?.readOnlyHint).toBe(true);
     expect(byName.get('sc2_read_file')?.annotations?.readOnlyHint).toBe(true);
+    expect(byName.get('sc2_test_document')?.annotations?.readOnlyHint).toBe(false);
+    expect(byName.get('sc2_get_last_test_log')?.annotations?.readOnlyHint).toBe(true);
 
     // Restoring a snapshot discards every later change, so it is destructive; taking one
     // writes files but can never lose anything, so it is not.
@@ -275,6 +279,13 @@ describe('MCP server', () => {
     expect(byName.get('sc2_revert_change')?.annotations?.destructiveHint).toBe(true);
     expect(byName.get('sc2_create_snapshot')?.annotations?.readOnlyHint).toBe(false);
     expect(byName.get('sc2_create_snapshot')?.annotations?.destructiveHint).toBe(false);
+  });
+
+  it('reports an empty runtime-test log before the first launch', async () => {
+    const outcome = await callTool(harness.client, 'sc2_get_last_test_log');
+    expect(outcome.isError).toBe(false);
+    expect(outcome.structured['run']).toBeNull();
+    expect(outcome.structured['logs']).toEqual([]);
   });
 
   it('reports honest capabilities from sc2_get_server_info', async () => {
@@ -304,7 +315,7 @@ describe('MCP server', () => {
         expect.stringContaining('Galaxy scripts'),
         expect.stringContaining('type checking'),
         expect.stringContaining('Trigger structure'),
-        expect.stringContaining('runtime smoke test'),
+        expect.stringContaining('Automated in-game testing'),
       ]),
     );
     expect(limitations).not.toEqual(

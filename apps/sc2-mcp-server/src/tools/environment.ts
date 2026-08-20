@@ -59,6 +59,8 @@ const ServerInfoOutputSchema = z.object({
     .object({
       path: z.string(),
       editorPath: z.string().nullable(),
+      gameExecutablePath: z.string().nullable(),
+      switcherPath: z.string().nullable(),
       latestBuild: z.number().int().nullable(),
       source: z.string(),
     })
@@ -73,6 +75,7 @@ const InstallationSchema = z.object({
   source: z.string(),
   editorPath: z.string().nullable(),
   gameExecutablePath: z.string().nullable(),
+  switcherPath: z.string().nullable(),
   latestBuild: z.number().int().nullable(),
   usable: z.boolean(),
 });
@@ -144,7 +147,7 @@ function limitationsFor(context: ServerContext): string[] {
   }
   if (!capabilities.runtimeSmokeTest) {
     notes.push(
-      'An automated in-game runtime smoke test is unavailable; this build can open a document in the editor and read editor logs only.',
+      'Automated in-game testing is unavailable because the selected installation does not provide both SC2Switcher and a current game executable.',
     );
   }
   return notes;
@@ -187,6 +190,8 @@ export function registerEnvironmentTools(server: McpServer, context: ServerConte
             : {
                 path: installation.path,
                 editorPath: installation.editorPath,
+                gameExecutablePath: installation.gameExecutablePath,
+                switcherPath: installation.switcherPath,
                 latestBuild: installation.latestBuild,
                 source: installation.source,
               },
@@ -229,6 +234,7 @@ export function registerEnvironmentTools(server: McpServer, context: ServerConte
           source: candidate.source,
           editorPath: candidate.editorPath,
           gameExecutablePath: candidate.gameExecutablePath,
+          switcherPath: candidate.switcherPath,
           latestBuild: candidate.latestBuild,
           usable: candidate.usable,
         })),
@@ -240,6 +246,7 @@ export function registerEnvironmentTools(server: McpServer, context: ServerConte
                 source: selected.source,
                 editorPath: selected.editorPath,
                 gameExecutablePath: selected.gameExecutablePath,
+                switcherPath: selected.switcherPath,
                 latestBuild: selected.latestBuild,
                 usable: selected.usable,
               },

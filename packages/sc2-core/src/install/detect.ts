@@ -29,12 +29,20 @@ export interface Sc2Installation {
   readonly latestBuild: number | null;
   /** Absolute path of `SC2_x64.exe` for {@link latestBuild}. */
   readonly gameExecutablePath: string | null;
+  /** Absolute path of the launcher used by the editor's Test Document command. */
+  readonly switcherPath: string | null;
   /** True when the root looks like a real installation rather than a stray folder. */
   readonly usable: boolean;
 }
 
 /** Editor executables, most-preferred first. */
 const EDITOR_EXECUTABLES = ['StarCraft II Editor_x64.exe', 'StarCraft II Editor.exe'];
+
+/** Test launchers, most-preferred first. */
+const SWITCHER_EXECUTABLES = [
+  ['Support64', 'SC2Switcher_x64.exe'],
+  ['Support', 'SC2Switcher.exe'],
+] as const;
 
 /** Non-recursive, hand-picked locations. Deliberately short — this is not a search. */
 function knownLocations(): string[] {
@@ -95,12 +103,22 @@ export async function inspectInstallation(root: string, source: Sc2Installation[
     }
   }
 
+  let switcherPath: string | null = null;
+  for (const segments of SWITCHER_EXECUTABLES) {
+    const candidate = path.join(resolvedRoot, ...segments);
+    if (await pathExists(candidate)) {
+      switcherPath = candidate;
+      break;
+    }
+  }
+
   return {
     path: resolvedRoot,
     source,
     editorPath,
     latestBuild,
     gameExecutablePath,
+    switcherPath,
     // An installation is only useful to us if we can reach the editor. A game-only
     // install (no editor) is reported but marked unusable rather than hidden.
     usable: editorPath !== null,

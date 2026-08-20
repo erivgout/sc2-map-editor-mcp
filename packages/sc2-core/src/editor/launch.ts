@@ -6,11 +6,8 @@
  * changes it changes by manipulating files. This module only opens the editor so a human
  * — or a later verification step — can confirm the result loads.
  *
- * What is deliberately **not** here: automated test-map launching. PLAN.md §29 says not to
- * promise it until it has been empirically verified against the current client, and it has
- * not been. Inspecting `StarCraft II Editor_x64.exe` (build 5.0.16 / 97563) turned up no
- * documented command-line switch for it. Shipping a `sc2_test_document` that merely opens
- * the editor and hopes would be exactly the faked support PLAN.md §55 rule 2 forbids.
+ * Runtime testing is implemented separately in `runtime.ts`. It mirrors the launch path
+ * observed from the editor's Test Document command without using editor UI automation.
  */
 
 import { spawn } from 'node:child_process';
@@ -23,13 +20,13 @@ import type { Sc2Installation } from '../install/detect.js';
 
 export interface LaunchEditorInput {
   readonly installation: Sc2Installation;
-  /** Document to open. Must already exist and have been guarded. */
-  readonly documentPath: string;
+  /** Document to open. Must already exist and have been guarded. `null` opens a blank editor. */
+  readonly documentPath: string | null;
 }
 
 export interface LaunchEditorResult {
   readonly executablePath: string;
-  readonly documentPath: string;
+  readonly documentPath: string | null;
   readonly pid: number | null;
 }
 
@@ -52,7 +49,7 @@ export function launchEditor(input: LaunchEditorInput): LaunchEditorResult {
 
   let child;
   try {
-    child = spawn(executablePath, [input.documentPath], {
+    child = spawn(executablePath, input.documentPath === null ? [] : [input.documentPath], {
       detached: true,
       stdio: 'ignore',
       windowsHide: false,

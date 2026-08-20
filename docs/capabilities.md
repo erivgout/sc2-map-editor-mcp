@@ -109,6 +109,22 @@ retail installation; `VoidMulti.SC2Mod` and friends live inside the CASC content
 have. `sc2_get_dependencies` reports them as `in-casc` rather than `not-found`, because
 "this build cannot read it" and "your map is broken" are very different statements.
 
+**Editor and runtime testing.** `sc2_launch_editor` opens a packed document or a workspace
+staging tree in the Galaxy Editor. `sc2_test_document` performs the actual in-game check.
+It copies the selected packed map or extensionless workspace tree into the installation's
+bounded `Maps\Test\SC2MCPTest.SC2Map` location, writes an editor-compatible
+`SC2TestConfig`, and invokes the preferred `SC2Switcher` binary. The tool waits for the
+current game executable to appear and returns both launcher and game PIDs.
+
+This path was captured from editor 5.0.16 / build 97563 and then reproduced through the
+built MCP server. Directly invoking `SC2_x64.exe` failed; invoking `SC2Switcher_x64.exe`
+with the captured arguments succeeded. A packed MCP-authored map reached live gameplay,
+and an unpacked user map opened as a workspace, copied from its extensionless staging
+directory, reached an in-game result screen. `sc2_get_last_test_log` correlates GameLogs
+by launch time, reports whether the game PID is still running, includes the newest Alerts
+log, and extracts actionable alert messages. Runtime support is advertised only when the
+selected installation contains both SC2Switcher and a current game executable.
+
 ## Validation categories
 
 `sc2_validate_document` reports every category on every run, with one of four statuses:
